@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 84% 5%;
+    --foreground: 210 40% 98%;
+    --primary: 160 84% 39%;
+    --primary-foreground: 210 40% 98%;
+    --accent: 291 64% 42%;
+    --accent-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --border: 217 33% 20%;
+    --ring: 160 84% 39%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-surface-950 text-surface-100;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-surface-900;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-700 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-surface-600;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-primary-400 via-accent-400 to-primary-400 bg-clip-text text-transparent;
+  }
+
+  .glass {
+    @apply bg-surface-900/50 backdrop-blur-xl border border-surface-700/50;
+  }
+
+  .glow-primary {
+    box-shadow: 0 0 20px theme("colors.primary.500 / 30%"),
+                0 0 40px theme("colors.primary.500 / 20%");
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 20px theme("colors.accent.500 / 30%"),
+                0 0 40px theme("colors.accent.500 / 20%");
+  }
+}
+
+/* Animation utilities */
+@layer utilities {
+  .animate-in {
+    animation: animateIn 0.3s ease-out;
+  }
+
+  @keyframes animateIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
