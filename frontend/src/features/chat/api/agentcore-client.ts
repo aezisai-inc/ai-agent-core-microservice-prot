@@ -187,48 +187,76 @@ export class AgentCoreClient {
       const response = await client.send(command);
 
       // ストリーミングレスポンスを処理
+      // SdkStream には transformToWebStream(), transformToString(), transformToByteArray() がある
       if (response.response) {
-        // response は AsyncIterable<Uint8Array> の場合
-        if (typeof response.response[Symbol.asyncIterator] === 'function') {
-          for await (const chunk of response.response as AsyncIterable<Uint8Array>) {
-            const text = new TextDecoder().decode(chunk);
+        try {
+          // WebStream に変換してストリーミング処理
+          const webStream = response.response.transformToWebStream();
+          const reader = webStream.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
             
-            // JSON形式のチャンクをパース試行
-            try {
-              const data = JSON.parse(text);
-              
-              if (data.type === 'text' && data.content) {
-                fullResponse += data.content;
-                yield { type: 'text', content: data.content };
-              } else if (data.type === 'sources' && data.sources) {
-                sources.push(...data.sources);
-                yield { type: 'sources', sources: data.sources };
-              } else if (data.type === 'tool_use') {
-                yield { 
-                  type: 'tool_use', 
-                  toolName: data.name, 
-                  toolInput: data.input 
-                };
-              } else if (data.type === 'tool_result') {
-                yield { type: 'tool_result', toolResult: data.result };
-              } else if (data.content) {
-                // 汎用的なcontent
-                fullResponse += data.content;
-                yield { type: 'text', content: data.content };
-              } else if (typeof data === 'string') {
-                fullResponse += data;
-                yield { type: 'text', content: data };
+            // SSE形式 (data: ...) またはJSON形式をパース
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              if (!line.trim()) continue;
+
+              // SSE形式: data: {...}
+              const dataMatch = line.match(/^data:\s*(.+)$/);
+              const jsonStr = dataMatch ? dataMatch[1] : line;
+
+              try {
+                const data = JSON.parse(jsonStr);
+                
+                if (data.type === 'text' && data.content) {
+                  fullResponse += data.content;
+                  yield { type: 'text', content: data.content };
+                } else if (data.type === 'sources' && data.sources) {
+                  sources.push(...data.sources);
+                  yield { type: 'sources', sources: data.sources };
+                } else if (data.type === 'tool_use') {
+                  yield { 
+                    type: 'tool_use', 
+                    toolName: data.name, 
+                    toolInput: data.input 
+                  };
+                } else if (data.type === 'tool_result') {
+                  yield { type: 'tool_result', toolResult: data.result };
+                } else if (data.content) {
+                  fullResponse += data.content;
+                  yield { type: 'text', content: data.content };
+                } else if (typeof data === 'string') {
+                  fullResponse += data;
+                  yield { type: 'text', content: data };
+                }
+              } catch {
+                // JSONでない場合はテキストとして扱う
+                if (jsonStr.trim()) {
+                  fullResponse += jsonStr;
+                  yield { type: "text", content: jsonStr };
+                }
               }
-            } catch {
-              // JSONじゃない場合はテキストとして扱う
-              fullResponse += text;
-              yield { type: "text", content: text };
             }
           }
-        } else {
-          // 非ストリーミングレスポンス (Blob/Uint8Array)
-          const responseData = response.response as Uint8Array;
-          const text = new TextDecoder().decode(responseData);
+
+          // バッファに残りがあれば処理
+          if (buffer.trim()) {
+            fullResponse += buffer;
+            yield { type: "text", content: buffer };
+          }
+        } catch (streamError) {
+          // ストリーミングに失敗した場合、文字列として取得
+          console.warn("Stream processing failed, falling back to string:", streamError);
+          
+          const text = await response.response.transformToString();
           
           try {
             const data = JSON.parse(text);
