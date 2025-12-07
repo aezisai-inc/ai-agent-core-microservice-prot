@@ -342,7 +342,7 @@ export class AgentCoreClient {
       case 'end':
         return {
           type: 'end',
-          tokensUsed: data.usage?.output_tokens as number || data.tokens_used as number,
+          tokensUsed: (data.usage as { output_tokens?: number })?.output_tokens || data.tokens_used as number,
         };
 
       case 'error':
