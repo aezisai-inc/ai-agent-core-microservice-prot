@@ -13,8 +13,18 @@
 |-------|--------|------|
 | ✅ AgenticRag-development | 成功 | DynamoDB, S3, KMS |
 | ✅ AgenticRag-ECR-development | 成功 | ECR Repository |
-| ❌ AgenticRag-Memory-development | 失敗 | AgentCore Memory (Preview) |
+| ⚠️ AgenticRag-Memory-development | CDK失敗→CLI成功 | boto3で直接作成 |
 | ✅ AgenticRag-AgentCore-development | 成功 | IAM, SSM |
+
+### AgentCore Memory Store (手動作成)
+
+| 項目 | 値 |
+|-----|-----|
+| Memory ID | `agenticRagMemoryDevelopment-VIXDrsGejQ` |
+| ARN | `arn:aws:bedrock-agentcore:us-east-1:226484346947:memory/agenticRagMemoryDevelopment-VIXDrsGejQ` |
+| Region | `us-east-1` |
+| Event Expiry | 30日 |
+| SSM Parameter | `/agentcore/development/memory-store-id` |
 
 ---
 
@@ -46,34 +56,44 @@
 
 ---
 
-## ❌ 失敗したスタック
+## ⚠️ CDK失敗 → CLI で解決
 
 ### AgenticRag-Memory-development
 
-**エラー内容**:
+**CDK エラー**:
 ```
 CustomResource attribute error: Vendor response doesn't contain MemoryStoreId attribute
 ```
 
 **原因**:
-- **AgentCore Memory** は現在 **Preview** 段階のサービス
-- Bedrock AgentCore Memory Store の API が `MemoryStoreId` 属性を返さない
-- Custom Resource の実装が GA 版の API レスポンス形式を期待している
+- CDK Custom Resource の実装が API レスポンス形式と不一致
+- サービス自体は **正常に動作**
 
-**対応策**:
-1. AgentCore Memory が GA (General Availability) になるまで待機
-2. Memory Stack を一時的にスキップ（実施済み）
-3. `bin/infrastructure.ts` で Memory Stack をコメントアウト
+**解決策**: boto3 で直接作成
 
-**回避コード** (`bin/infrastructure.ts`):
-```typescript
-// 3. Memory スタック (AgentCore Memory Store)
-// NOTE: AgentCore Memory は現在 Preview のため、一時的にスキップ
-// const memoryStack = new MemoryStack(app, `AgenticRag-Memory-${environment}`, { ... });
+```python
+import boto3
 
-// AgentCore Stack では placeholder を使用
-memoryStoreId: "placeholder-memory-store",
+client = boto3.client('bedrock-agentcore-control', region_name='us-east-1')
+
+response = client.create_memory(
+    name='agenticRagMemoryDevelopment',
+    description='Memory store for Agentic RAG development environment',
+    eventExpiryDuration=30,  # 日数
+)
+# => Memory ID: agenticRagMemoryDevelopment-VIXDrsGejQ
 ```
+
+**SSM パラメータ登録**:
+```bash
+aws ssm put-parameter \
+  --name "/agentcore/development/memory-store-id" \
+  --value "agenticRagMemoryDevelopment-VIXDrsGejQ" \
+  --type String \
+  --region ap-northeast-1
+```
+
+**結論**: CDK の Custom Resource に問題があるだけで、AgentCore Memory 自体は利用可能
 
 ---
 
