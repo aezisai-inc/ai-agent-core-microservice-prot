@@ -8,11 +8,7 @@ import { AgentCoreClient } from '../api/agentcore-client';
 
 // Mock AgentCoreClient
 jest.mock('../api/agentcore-client', () => ({
-  AgentCoreClient: jest.fn().mockImplementation(() => ({
-    stream: jest.fn(),
-    invoke: jest.fn(),
-    reset: jest.fn(),
-  })),
+  AgentCoreClient: jest.fn(),
 }));
 
 describe('useChatStream', () => {
@@ -28,12 +24,26 @@ describe('useChatStream', () => {
     userId: 'user-1',
   };
 
+  const createMockStream = (chunks: Array<{ type: string; content?: string; error?: string; sources?: unknown[]; latencyMs?: number; tokensUsed?: number }>) => {
+    return jest.fn().mockImplementation(async function* () {
+      for (const chunk of chunks) {
+        yield chunk;
+      }
+    });
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
   describe('initialization', () => {
     it('should initialize with empty messages', () => {
+      (AgentCoreClient as jest.Mock).mockImplementation(() => ({
+        stream: createMockStream([]),
+        invoke: jest.fn(),
+        reset: jest.fn(),
+      }));
+
       const { result } = renderHook(() => useChatStream(defaultOptions));
 
       expect(result.current.messages).toEqual([]);
@@ -45,12 +55,11 @@ describe('useChatStream', () => {
 
   describe('sendMessage', () => {
     it('should add user message to messages array', async () => {
-      // Mock async generator for stream
-      const mockStream = jest.fn().mockImplementation(async function* () {
-        yield { type: 'text', content: 'Hello ' };
-        yield { type: 'text', content: 'from AI' };
-        yield { type: 'end', latencyMs: 500, tokensUsed: 100 };
-      });
+      const mockStream = createMockStream([
+        { type: 'text', content: 'Hello ' },
+        { type: 'text', content: 'from AI' },
+        { type: 'end', latencyMs: 500, tokensUsed: 100 },
+      ]);
 
       (AgentCoreClient as jest.Mock).mockImplementation(() => ({
         stream: mockStream,
@@ -72,10 +81,10 @@ describe('useChatStream', () => {
     });
 
     it('should call onMessage callback', async () => {
-      const mockStream = jest.fn().mockImplementation(async function* () {
-        yield { type: 'text', content: 'Response' };
-        yield { type: 'end', latencyMs: 200, tokensUsed: 50 };
-      });
+      const mockStream = createMockStream([
+        { type: 'text', content: 'Response' },
+        { type: 'end', latencyMs: 200, tokensUsed: 50 },
+      ]);
 
       (AgentCoreClient as jest.Mock).mockImplementation(() => ({
         stream: mockStream,
@@ -101,9 +110,9 @@ describe('useChatStream', () => {
     });
 
     it('should handle errors', async () => {
-      const mockStream = jest.fn().mockImplementation(async function* () {
-        yield { type: 'error', error: 'API Error' };
-      });
+      const mockStream = createMockStream([
+        { type: 'error', error: 'API Error' },
+      ]);
 
       (AgentCoreClient as jest.Mock).mockImplementation(() => ({
         stream: mockStream,
@@ -127,10 +136,10 @@ describe('useChatStream', () => {
 
   describe('clearMessages', () => {
     it('should clear all messages', async () => {
-      const mockStream = jest.fn().mockImplementation(async function* () {
-        yield { type: 'text', content: 'Response' };
-        yield { type: 'end', latencyMs: 200, tokensUsed: 50 };
-      });
+      const mockStream = createMockStream([
+        { type: 'text', content: 'Response' },
+        { type: 'end', latencyMs: 200, tokensUsed: 50 },
+      ]);
 
       (AgentCoreClient as jest.Mock).mockImplementation(() => ({
         stream: mockStream,
@@ -156,9 +165,9 @@ describe('useChatStream', () => {
 
   describe('clearError', () => {
     it('should clear error', async () => {
-      const mockStream = jest.fn().mockImplementation(async function* () {
-        yield { type: 'error', error: 'Test error' };
-      });
+      const mockStream = createMockStream([
+        { type: 'error', error: 'Test error' },
+      ]);
 
       (AgentCoreClient as jest.Mock).mockImplementation(() => ({
         stream: mockStream,
@@ -185,18 +194,20 @@ describe('useChatStream', () => {
   describe('regenerate', () => {
     it('should remove last assistant message and resend', async () => {
       let callCount = 0;
-      const mockStream = jest.fn().mockImplementation(async function* () {
-        callCount++;
-        if (callCount === 1) {
-          yield { type: 'text', content: 'First response' };
-        } else {
-          yield { type: 'text', content: 'Second response' };
-        }
-        yield { type: 'end', latencyMs: 200, tokensUsed: 50 };
-      });
+      const createDynamicMockStream = () => {
+        return jest.fn().mockImplementation(async function* () {
+          callCount++;
+          if (callCount === 1) {
+            yield { type: 'text', content: 'First response' };
+          } else {
+            yield { type: 'text', content: 'Second response' };
+          }
+          yield { type: 'end', latencyMs: 200, tokensUsed: 50 };
+        });
+      };
 
       (AgentCoreClient as jest.Mock).mockImplementation(() => ({
-        stream: mockStream,
+        stream: createDynamicMockStream(),
         invoke: jest.fn(),
         reset: jest.fn(),
       }));
@@ -228,11 +239,11 @@ describe('useChatStream', () => {
         { content: 'Source content', score: 0.95, source: 's3://bucket/doc.md' },
       ];
 
-      const mockStream = jest.fn().mockImplementation(async function* () {
-        yield { type: 'text', content: 'Response with sources' };
-        yield { type: 'sources', sources: mockSources };
-        yield { type: 'end', latencyMs: 200, tokensUsed: 50 };
-      });
+      const mockStream = createMockStream([
+        { type: 'text', content: 'Response with sources' },
+        { type: 'sources', sources: mockSources },
+        { type: 'end', latencyMs: 200, tokensUsed: 50 },
+      ]);
 
       (AgentCoreClient as jest.Mock).mockImplementation(() => ({
         stream: mockStream,

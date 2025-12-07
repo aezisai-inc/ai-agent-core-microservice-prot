@@ -11,10 +11,15 @@ import {
   getAgentCoreClient,
 } from '../api/agentcore-client';
 
+// TextEncoder polyfill for Jest
+global.TextEncoder = require('util').TextEncoder;
+global.TextDecoder = require('util').TextDecoder;
+
 // Mock AWS SDK
+const mockSend = jest.fn();
 jest.mock('@aws-sdk/client-bedrock-agent-runtime', () => ({
   BedrockAgentRuntimeClient: jest.fn().mockImplementation(() => ({
-    send: jest.fn(),
+    send: mockSend,
   })),
   InvokeAgentCommand: jest.fn(),
 }));
@@ -42,48 +47,44 @@ describe('AgentCoreClient', () => {
     userPoolId: 'test-user-pool-id',
   };
 
-  let client: AgentCoreClient;
-
   beforeEach(() => {
     jest.clearAllMocks();
-    client = new AgentCoreClient(defaultConfig);
+    mockSend.mockReset();
   });
 
   describe('constructor', () => {
     it('should create client with config', () => {
+      const client = new AgentCoreClient(defaultConfig);
       expect(client).toBeInstanceOf(AgentCoreClient);
     });
   });
 
   describe('stream', () => {
-    it('should yield text chunks', async () => {
-      const { BedrockAgentRuntimeClient } = await import('@aws-sdk/client-bedrock-agent-runtime');
-      
-      // Mock streaming response
-      const mockCompletion = (async function* () {
-        yield {
-          chunk: {
-            bytes: new TextEncoder().encode('Hello '),
-          },
-        };
-        yield {
-          chunk: {
-            bytes: new TextEncoder().encode('World'),
-          },
-        };
-      })();
+    it('should yield text chunks from completion', async () => {
+      // Mock async iterable completion
+      const mockCompletion = {
+        [Symbol.asyncIterator]: async function* () {
+          yield {
+            chunk: {
+              bytes: new TextEncoder().encode('Hello '),
+            },
+          };
+          yield {
+            chunk: {
+              bytes: new TextEncoder().encode('World'),
+            },
+          };
+        },
+      };
 
-      (BedrockAgentRuntimeClient as jest.Mock).mockImplementation(() => ({
-        send: jest.fn().mockResolvedValue({
-          completion: mockCompletion,
-        }),
-      }));
+      mockSend.mockResolvedValue({
+        completion: mockCompletion,
+      });
 
-      // Create new client to use updated mock
-      const testClient = new AgentCoreClient(defaultConfig);
-
+      const client = new AgentCoreClient(defaultConfig);
       const chunks: string[] = [];
-      for await (const chunk of testClient.stream({
+      
+      for await (const chunk of client.stream({
         sessionId: 'test-session',
         userId: 'test-user',
         prompt: 'Hello',
@@ -96,17 +97,13 @@ describe('AgentCoreClient', () => {
       expect(chunks.join('')).toBe('Hello World');
     });
 
-    it('should yield error on failure', async () => {
-      const { BedrockAgentRuntimeClient } = await import('@aws-sdk/client-bedrock-agent-runtime');
-      
-      (BedrockAgentRuntimeClient as jest.Mock).mockImplementation(() => ({
-        send: jest.fn().mockRejectedValue(new Error('API Error')),
-      }));
+    it('should yield error on API failure', async () => {
+      mockSend.mockRejectedValue(new Error('API Error'));
 
-      const testClient = new AgentCoreClient(defaultConfig);
-
+      const client = new AgentCoreClient(defaultConfig);
       let errorChunk = null;
-      for await (const chunk of testClient.stream({
+      
+      for await (const chunk of client.stream({
         sessionId: 'test-session',
         userId: 'test-user',
         prompt: 'Hello',
@@ -119,40 +116,71 @@ describe('AgentCoreClient', () => {
       expect(errorChunk).not.toBeNull();
       expect(errorChunk?.error).toContain('API Error');
     });
+
+    it('should yield end chunk when stream completes', async () => {
+      const mockCompletion = {
+        [Symbol.asyncIterator]: async function* () {
+          yield {
+            chunk: {
+              bytes: new TextEncoder().encode('Done'),
+            },
+          };
+        },
+      };
+
+      mockSend.mockResolvedValue({
+        completion: mockCompletion,
+      });
+
+      const client = new AgentCoreClient(defaultConfig);
+      let endChunk = null;
+      
+      for await (const chunk of client.stream({
+        sessionId: 'test-session',
+        userId: 'test-user',
+        prompt: 'Hello',
+      })) {
+        if (chunk.type === 'end') {
+          endChunk = chunk;
+        }
+      }
+
+      expect(endChunk).not.toBeNull();
+      expect(endChunk?.latencyMs).toBeDefined();
+    });
   });
 
   describe('invoke', () => {
     it('should return aggregated response', async () => {
-      const { BedrockAgentRuntimeClient } = await import('@aws-sdk/client-bedrock-agent-runtime');
-      
-      const mockCompletion = (async function* () {
-        yield {
-          chunk: {
-            bytes: new TextEncoder().encode('Complete response'),
-          },
-        };
-      })();
+      const mockCompletion = {
+        [Symbol.asyncIterator]: async function* () {
+          yield {
+            chunk: {
+              bytes: new TextEncoder().encode('Complete response'),
+            },
+          };
+        },
+      };
 
-      (BedrockAgentRuntimeClient as jest.Mock).mockImplementation(() => ({
-        send: jest.fn().mockResolvedValue({
-          completion: mockCompletion,
-        }),
-      }));
+      mockSend.mockResolvedValue({
+        completion: mockCompletion,
+      });
 
-      const testClient = new AgentCoreClient(defaultConfig);
-
-      const result = await testClient.invoke({
+      const client = new AgentCoreClient(defaultConfig);
+      const result = await client.invoke({
         sessionId: 'test-session',
         userId: 'test-user',
         prompt: 'Hello',
       });
 
       expect(result.response).toBe('Complete response');
+      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
     });
   });
 
   describe('reset', () => {
-    it('should reset client state', () => {
+    it('should reset client state without error', () => {
+      const client = new AgentCoreClient(defaultConfig);
       expect(() => client.reset()).not.toThrow();
     });
   });
