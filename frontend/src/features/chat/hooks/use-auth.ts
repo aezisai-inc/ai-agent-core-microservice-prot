@@ -5,7 +5,7 @@
  * AgentCore Runtime への認証用 JWT トークンを管理。
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   signIn,
   signOut,
@@ -13,10 +13,10 @@ import {
   confirmSignUp,
   getCurrentUser,
   fetchAuthSession,
-  AuthUser,
   SignInInput,
   SignUpInput,
 } from 'aws-amplify/auth';
+import { isConfigValid } from '@/shared/lib/config';
 
 export interface User {
   userId: string;
@@ -62,11 +62,18 @@ export function useAuth(): UseAuthReturn {
     isLoading: true,
     error: null,
   });
+  
+  const initialized = useRef(false);
 
   /**
    * 現在のユーザー情報を取得
    */
   const fetchUser = useCallback(async (): Promise<User | null> => {
+    // Amplify が設定されていない場合はスキップ
+    if (!isConfigValid()) {
+      return null;
+    }
+
     try {
       const currentUser = await getCurrentUser();
       const session = await fetchAuthSession();
@@ -91,6 +98,17 @@ export function useAuth(): UseAuthReturn {
    * 認証状態を更新
    */
   const refreshAuth = useCallback(async () => {
+    // Amplify が設定されていない場合は未認証として扱う
+    if (!isConfigValid()) {
+      setState({
+        user: null,
+        isAuthenticated: false,
+        isLoading: false,
+        error: null,
+      });
+      return;
+    }
+
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
     
     try {
@@ -111,15 +129,27 @@ export function useAuth(): UseAuthReturn {
     }
   }, [fetchUser]);
 
-  // 初期化時に認証状態をチェック
+  // 初期化時に認証状態をチェック (一度だけ)
   useEffect(() => {
-    refreshAuth();
+    if (initialized.current) return;
+    initialized.current = true;
+    
+    // 少し遅延して Amplify 初期化を待つ
+    const timer = setTimeout(() => {
+      refreshAuth();
+    }, 100);
+    
+    return () => clearTimeout(timer);
   }, [refreshAuth]);
 
   /**
    * サインイン
    */
   const login = useCallback(async (email: string, password: string) => {
+    if (!isConfigValid()) {
+      throw new Error('Amplify is not configured');
+    }
+
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
@@ -154,6 +184,10 @@ export function useAuth(): UseAuthReturn {
    * サインアウト
    */
   const logout = useCallback(async () => {
+    if (!isConfigValid()) {
+      throw new Error('Amplify is not configured');
+    }
+
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
@@ -178,6 +212,10 @@ export function useAuth(): UseAuthReturn {
    * サインアップ
    */
   const register = useCallback(async (email: string, password: string) => {
+    if (!isConfigValid()) {
+      throw new Error('Amplify is not configured');
+    }
+
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
@@ -207,6 +245,10 @@ export function useAuth(): UseAuthReturn {
    * サインアップ確認
    */
   const confirmRegistration = useCallback(async (email: string, code: string) => {
+    if (!isConfigValid()) {
+      throw new Error('Amplify is not configured');
+    }
+
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
@@ -229,6 +271,10 @@ export function useAuth(): UseAuthReturn {
    * アクセストークン取得
    */
   const getAccessToken = useCallback(async (): Promise<string | null> => {
+    if (!isConfigValid()) {
+      return null;
+    }
+
     try {
       const session = await fetchAuthSession();
       return session.tokens?.accessToken?.toString() ?? null;
@@ -241,6 +287,10 @@ export function useAuth(): UseAuthReturn {
    * ID トークン取得
    */
   const getIdToken = useCallback(async (): Promise<string | null> => {
+    if (!isConfigValid()) {
+      return null;
+    }
+
     try {
       const session = await fetchAuthSession();
       return session.tokens?.idToken?.toString() ?? null;
