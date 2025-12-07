@@ -5,6 +5,8 @@ Amazon Bedrock AgentCore, including:
 - Memory Client (Short-term, Episodic, Semantic)
 - Episodic Memory Service
 - Reflection Service
+- Session Memory Service
+- Tenant Memory Service (Multi-tenant support)
 """
 
 from src.infrastructure.agentcore.memory_client import (
@@ -20,6 +22,15 @@ from src.infrastructure.agentcore.reflection_service import (
     ReflectionService,
 )
 from src.infrastructure.agentcore.memory_config import MemoryConfig
+from src.infrastructure.agentcore.session_memory import (
+    Message,
+    SessionContext,
+    SessionMemoryService,
+)
+from src.infrastructure.agentcore.tenant_memory import (
+    TenantConfig,
+    TenantMemoryService,
+)
 
 __all__ = [
     "AgentCoreMemoryClient",
@@ -29,4 +40,9 @@ __all__ = [
     "Reflection",
     "ReflectionService",
     "MemoryConfig",
+    "Message",
+    "SessionContext",
+    "SessionMemoryService",
+    "TenantConfig",
+    "TenantMemoryService",
 ]
