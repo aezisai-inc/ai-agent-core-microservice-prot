@@ -16,6 +16,7 @@ export {
   type InvokeParams,
   type InvokeResponse,
   type StreamChunk,
+  type RAGSource,
 } from "./api/agentcore-client";
 
 // Hooks

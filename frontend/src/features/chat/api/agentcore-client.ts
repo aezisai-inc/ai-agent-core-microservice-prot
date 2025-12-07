@@ -31,9 +31,18 @@ export interface InvokeParams {
   stream?: boolean;
 }
 
+export interface RAGSource {
+  /** コンテンツ */
+  content: string;
+  /** 関連度スコア (0-1) */
+  score: number;
+  /** ソースファイル名/パス */
+  source: string;
+}
+
 export interface StreamChunk {
   /** チャンクタイプ */
-  type: 'text' | 'tool_use' | 'tool_result' | 'end' | 'error';
+  type: 'text' | 'tool_use' | 'tool_result' | 'sources' | 'end' | 'error';
   /** テキストコンテンツ (type='text' の場合) */
   content?: string;
   /** ツール名 (type='tool_use' の場合) */
@@ -42,6 +51,8 @@ export interface StreamChunk {
   toolInput?: Record<string, unknown>;
   /** ツール結果 (type='tool_result' の場合) */
   toolResult?: string;
+  /** RAGソース (type='sources' の場合) */
+  sources?: RAGSource[];
   /** エラーメッセージ (type='error' の場合) */
   error?: string;
   /** 使用トークン数 (type='end' の場合) */
@@ -338,11 +349,19 @@ export class AgentCoreClient {
           toolResult: data.result as string || data.tool_result as string,
         };
 
+      case 'sources':
+      case 'rag_sources':
+        return {
+          type: 'sources',
+          sources: (data.sources as RAGSource[]) || [],
+        };
+
       case 'message_stop':
       case 'end':
         return {
           type: 'end',
           tokensUsed: (data.usage as { output_tokens?: number })?.output_tokens || data.tokens_used as number,
+          sources: (data.sources as RAGSource[]) || undefined,
         };
 
       case 'error':

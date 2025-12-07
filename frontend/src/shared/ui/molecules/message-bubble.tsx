@@ -1,21 +1,27 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { ChevronDown, ChevronUp, BookOpen } from "lucide-react";
 import { Avatar } from "../atoms/avatar";
+import { SourceCard } from "./source-card";
 import { cn } from "@/shared/lib/utils";
+
+export interface RAGSourceInfo {
+  content: string;
+  score: number;
+  source: string;
+}
 
 export interface MessageBubbleProps {
   role: "user" | "assistant";
   content: string;
   timestamp?: Date;
   isStreaming?: boolean;
-  sources?: Array<{
-    title: string;
-    url: string;
-  }>;
+  sources?: RAGSourceInfo[];
 }
 
 export function MessageBubble({
@@ -26,6 +32,8 @@ export function MessageBubble({
   sources,
 }: MessageBubbleProps) {
   const isUser = role === "user";
+  const [showSources, setShowSources] = useState(false);
+  const hasValidSources = sources && sources.length > 0;
 
   return (
     <motion.div
@@ -100,19 +108,45 @@ export function MessageBubble({
           )}
         </div>
 
-        {sources && sources.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-2">
-            {sources.map((source, index) => (
-              <a
-                key={index}
-                href={source.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-primary-400 hover:text-primary-300 underline"
-              >
-                [{index + 1}] {source.title}
-              </a>
-            ))}
+        {/* RAG Sources Section */}
+        {hasValidSources && (
+          <div className="w-full mt-2">
+            <button
+              onClick={() => setShowSources(!showSources)}
+              className="flex items-center gap-2 text-xs text-primary-400 hover:text-primary-300 transition-colors"
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              <span>参照ソース ({sources.length}件)</span>
+              {showSources ? (
+                <ChevronUp className="h-3 w-3" />
+              ) : (
+                <ChevronDown className="h-3 w-3" />
+              )}
+            </button>
+            
+            <AnimatePresence>
+              {showSources && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="grid gap-2 mt-2">
+                    {sources.map((source, index) => (
+                      <SourceCard
+                        key={index}
+                        title={source.source.split('/').pop() || `Source ${index + 1}`}
+                        content={source.content}
+                        score={source.score}
+                        source={source.source}
+                      />
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
 

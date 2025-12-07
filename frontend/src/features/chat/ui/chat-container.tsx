@@ -104,10 +104,8 @@ export function ChatContainer({ agentId, className }: ChatContainerProps) {
       role: msg.role as 'user' | 'assistant',
       content: msg.content,
       timestamp: msg.timestamp,
-      sources: msg.sources?.map((s) => ({
-        title: s.source.split('/').pop() || 'Document',
-        url: s.source,
-      })),
+      // RAGソース情報をそのまま渡す
+      sources: msg.sources,
     }));
 
     // ストリーミング中のメッセージを追加

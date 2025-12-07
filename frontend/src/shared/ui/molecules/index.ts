@@ -6,6 +6,6 @@
  */
 
 export { ChatInput } from "./chat-input";
-export { MessageBubble, type MessageBubbleProps } from "./message-bubble";
+export { MessageBubble, type MessageBubbleProps, type RAGSourceInfo } from "./message-bubble";
 export { SourceCard } from "./source-card";
 

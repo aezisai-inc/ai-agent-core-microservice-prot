@@ -12,6 +12,7 @@ import {
   InvokeParams,
   InvokeResponse,
   AgentCoreConfig,
+  RAGSource,
 } from '../api/agentcore-client';
 
 export type StreamMode = 'sse' | 'websocket' | 'none';
@@ -27,11 +28,7 @@ export interface ChatMessage {
     input: Record<string, unknown>;
     result?: string;
   }>;
-  sources?: Array<{
-    content: string;
-    score: number;
-    source: string;
-  }>;
+  sources?: RAGSource[];
   tokensUsed?: number;
   latencyMs?: number;
 }
@@ -100,6 +97,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
   const wsCleanupRef = useRef<(() => void) | null>(null);
   const lastUserMessageRef = useRef<string>('');
   const currentToolUsesRef = useRef<ChatMessage['toolUses']>([]);
+  const currentSourcesRef = useRef<RAGSource[]>([]);
 
   // クライアント初期化
   useEffect(() => {
@@ -142,6 +140,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
 
       let accumulatedText = '';
       currentToolUsesRef.current = [];
+      currentSourcesRef.current = [];
 
       for await (const chunk of clientRef.current.stream(params)) {
         switch (chunk.type) {
@@ -167,13 +166,21 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
             }
             break;
 
+          case 'sources':
+            currentSourcesRef.current = chunk.sources || [];
+            break;
+
           case 'end':
+            // endチャンクにsourcesが含まれている場合はそちらを優先
+            const sources = chunk.sources || currentSourcesRef.current;
+            
             const assistantMessage: ChatMessage = {
               id: generateId(),
               role: 'assistant',
               content: accumulatedText,
               timestamp: new Date(),
               toolUses: currentToolUsesRef.current,
+              sources: sources.length > 0 ? sources : undefined,
               tokensUsed: chunk.tokensUsed,
               latencyMs: chunk.latencyMs,
             };
@@ -186,7 +193,7 @@ export function useChatStream(options: UseChatStreamOptions): UseChatStreamRetur
               tokensUsed: chunk.tokensUsed || 0,
               latencyMs: chunk.latencyMs || 0,
               toolsUsed: currentToolUsesRef.current?.map((t) => t.name) || [],
-              sources: [],
+              sources,
             });
             break;
 
