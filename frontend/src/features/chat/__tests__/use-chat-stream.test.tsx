@@ -15,8 +15,8 @@ describe('useChatStream', () => {
   const defaultOptions = {
     config: {
       region: 'ap-northeast-1',
-      agentRuntimeId: 'test-runtime-id',
-      agentEndpointId: 'test-endpoint-id',
+      agentRuntimeArn: 'arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:runtime/test-runtime',
+      agentEndpointName: 'test-endpoint',
       identityPoolId: 'test-identity-pool-id',
       userPoolId: 'test-user-pool-id',
     },

@@ -41,8 +41,8 @@ jest.mock('aws-amplify/auth', () => ({
 describe('AgentCoreClient', () => {
   const defaultConfig = {
     region: 'ap-northeast-1',
-    agentRuntimeId: 'test-runtime-id',
-    agentEndpointId: 'test-endpoint-id',
+    agentRuntimeArn: 'arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:runtime/test-runtime',
+    agentEndpointName: 'test-endpoint',
     identityPoolId: 'test-identity-pool-id',
     userPoolId: 'test-user-pool-id',
   };
@@ -60,25 +60,17 @@ describe('AgentCoreClient', () => {
   });
 
   describe('stream', () => {
-    it('should yield text chunks from responseStream', async () => {
-      // Mock async iterable responseStream
-      const mockResponseStream = {
+    it('should yield text chunks from response', async () => {
+      // Mock async iterable response that yields Uint8Array chunks
+      const mockResponse = {
         [Symbol.asyncIterator]: async function* () {
-          yield {
-            chunk: {
-              bytes: new TextEncoder().encode('Hello '),
-            },
-          };
-          yield {
-            chunk: {
-              bytes: new TextEncoder().encode('World'),
-            },
-          };
+          yield new TextEncoder().encode('Hello ');
+          yield new TextEncoder().encode('World');
         },
       };
 
       mockSend.mockResolvedValue({
-        responseStream: mockResponseStream,
+        response: mockResponse,
       });
 
       const client = new AgentCoreClient(defaultConfig);
@@ -118,18 +110,14 @@ describe('AgentCoreClient', () => {
     });
 
     it('should yield end chunk when stream completes', async () => {
-      const mockResponseStream = {
+      const mockResponse = {
         [Symbol.asyncIterator]: async function* () {
-          yield {
-            chunk: {
-              bytes: new TextEncoder().encode('Done'),
-            },
-          };
+          yield new TextEncoder().encode('Done');
         },
       };
 
       mockSend.mockResolvedValue({
-        responseStream: mockResponseStream,
+        response: mockResponse,
       });
 
       const client = new AgentCoreClient(defaultConfig);
@@ -152,18 +140,14 @@ describe('AgentCoreClient', () => {
 
   describe('invoke', () => {
     it('should return aggregated response', async () => {
-      const mockResponseStream = {
+      const mockResponse = {
         [Symbol.asyncIterator]: async function* () {
-          yield {
-            chunk: {
-              bytes: new TextEncoder().encode('Complete response'),
-            },
-          };
+          yield new TextEncoder().encode('Complete response');
         },
       };
 
       mockSend.mockResolvedValue({
-        responseStream: mockResponseStream,
+        response: mockResponse,
       });
 
       const client = new AgentCoreClient(defaultConfig);
@@ -198,8 +182,8 @@ describe('AgentCoreError', () => {
 describe('Singleton functions', () => {
   const config = {
     region: 'ap-northeast-1',
-    agentRuntimeId: 'test-runtime-id',
-    agentEndpointId: 'test-endpoint-id',
+    agentRuntimeArn: 'arn:aws:bedrock-agentcore:ap-northeast-1:123456789012:runtime/test-runtime',
+    agentEndpointName: 'test-endpoint',
     identityPoolId: 'test-identity-pool-id',
     userPoolId: 'test-user-pool-id',
   };
