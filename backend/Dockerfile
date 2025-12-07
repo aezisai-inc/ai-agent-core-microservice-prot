@@ -22,15 +22,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Add uv to PATH
 ENV PATH="/root/.local/bin:$PATH"
 
-# Copy dependency files first (for better layer caching)
-COPY pyproject.toml .
-COPY uv.lock .
+# Copy all project files (including README.md required by pyproject.toml)
+COPY pyproject.toml uv.lock README.md ./
+COPY src/ ./src/
 
 # Install Python dependencies using uv (much faster than pip)
+# --no-dev: skip dev dependencies
+# --frozen: use lockfile without updating
 RUN uv sync --no-dev --frozen
 
 # Copy application code
-COPY src/ ./src/
 COPY agent.py .
 
 # Set Python path
