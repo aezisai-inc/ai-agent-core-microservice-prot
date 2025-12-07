@@ -159,8 +159,50 @@ metadataConfiguration={
 3. ✅ ~~Knowledge Base インジェスト実行~~
 4. ✅ ~~Agent Runtime と Knowledge Base 連携~~
 5. ✅ ~~RAG 検索テスト~~
-6. ⬜ Frontend RAG UI 実装
+6. ✅ ~~Frontend RAG UI 実装~~
 7. ⬜ Amplify デプロイ
+8. ⬜ E2E テスト
+
+## Amplify デプロイ
+
+### デプロイコマンド
+
+```bash
+# デプロイスクリプト実行
+chmod +x scripts/deploy-amplify.sh
+GITHUB_TOKEN=<your_token> ./scripts/deploy-amplify.sh
+```
+
+### 必要な環境変数
+
+| 変数名 | 説明 |
+|--------|------|
+| `NEXT_PUBLIC_AWS_REGION` | ap-northeast-1 |
+| `NEXT_PUBLIC_AGENTCORE_ENDPOINT` | AgentCore エンドポイント URL |
+| `NEXT_PUBLIC_COGNITO_USER_POOL_ID` | Cognito User Pool ID |
+| `NEXT_PUBLIC_COGNITO_CLIENT_ID` | Cognito Client ID |
+| `NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID` | Cognito Identity Pool ID |
+
+### amplify.yml 設定
+
+```yaml
+version: 1
+applications:
+  - frontend:
+      phases:
+        preBuild:
+          commands:
+            - cd frontend
+            - npm ci
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: frontend/.next
+        files:
+          - '**/*'
+    appRoot: frontend
+```
 
 ## ドキュメントアップロード & インジェスト方法
 
