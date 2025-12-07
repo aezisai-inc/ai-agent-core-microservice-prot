@@ -28,15 +28,20 @@ interface EnvironmentConfig {
 
 /**
  * 環境変数のバリデーション
+ * 
+ * ビルド時とランタイム時の両方で動作するよう、
+ * 環境変数がない場合はプレースホルダーを返す。
+ * 実際の使用時に isConfigValid() でチェックする。
  */
 function validateEnvVar(name: string, value: string | undefined): string {
   if (!value) {
-    // 開発環境ではデフォルト値を使用（本番では必須）
-    if (process.env.NODE_ENV === 'development') {
-      console.warn(`[Config] Missing environment variable: ${name}. Using placeholder for development.`);
-      return `PLACEHOLDER_${name}`;
+    // ビルド時やローカル開発時はプレースホルダーを使用
+    // ランタイムで isConfigValid() をチェックして適切にハンドリング
+    if (typeof window === 'undefined') {
+      // SSR/ビルド時は警告のみ
+      console.warn(`[Config] Missing environment variable: ${name}. Using placeholder.`);
     }
-    throw new Error(`Missing required environment variable: ${name}`);
+    return `PLACEHOLDER_${name}`;
   }
   return value;
 }

@@ -7,6 +7,11 @@ export default {
   theme: {
     extend: {
       colors: {
+        // CSS variable based colors
+        border: "hsl(var(--border))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        ring: "hsl(var(--ring))",
         // Custom color palette - Cyberpunk inspired
         primary: {
           50: "#f0fdf9",
