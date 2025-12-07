@@ -1,11 +1,11 @@
 # AgentCore Deployment Report
 
 ## デプロイ完了日時
-2025-12-07 15:45 JST
+2025-12-07 16:00 JST (Knowledge Base追加)
 
 ## 環境
 - **Environment**: development
-- **AgentCore Region**: **ap-northeast-1 (東京)** ← 変更
+- **AgentCore Region**: **ap-northeast-1 (東京)**
 - **Infrastructure Region**: ap-northeast-1
 - **Account ID**: 226484346947
 
@@ -20,6 +20,9 @@
 | **Agent Runtime** | `agentcoreRuntimeDevelopment-D7hv2Z5zVV` | ✅ READY |
 | **Runtime Endpoint** | `agentcoreEndpointDevelopment` | ✅ READY |
 | **Memory Store** | `agenticRagMemoryTokyo-6b6TlgDbol` | ✅ ACTIVE |
+| **Knowledge Base** | `SWVG9LBC5K` | ✅ ACTIVE |
+| **S3 Data Source** | `NVVOAWSESK` | ✅ AVAILABLE |
+| **OpenSearch Collection** | `sj4efp9xypof1exox2ji` | ✅ ACTIVE |
 
 ### 2. インフラストラクチャ (CDK)
 
@@ -33,19 +36,23 @@
 | Cognito User Pool | agentic-rag-users-development | ✅ ACTIVE |
 | ECR Repository | agentic-rag-agent-development | ✅ ACTIVE |
 | IAM Role | agentcore-runtime-role-development | ✅ ACTIVE |
+| IAM Role | bedrock-knowledge-base-role-development | ✅ ACTIVE |
 | CodeBuild Project | agentic-rag-build-development (ARM64) | ✅ ACTIVE |
 
 ### 3. SSM Parameters
 
 ```
 /agentcore/development/
-├── agent-runtime-id      = agentcoreRuntimeDevelopment-D7hv2Z5zVV
-├── agent-endpoint-id     = agentcoreEndpointDevelopment
-├── memory-store-id       = agenticRagMemoryTokyo-6b6TlgDbol
-├── agentcore-region      = ap-northeast-1
-├── bedrock-model-id      = us.amazon.nova-pro-v1:0
-├── ecr-repository-uri    = 226484346947.dkr.ecr.ap-northeast-1.amazonaws.com/agentic-rag-agent-development
-└── environment           = development
+├── agent-runtime-id          = agentcoreRuntimeDevelopment-D7hv2Z5zVV
+├── agent-endpoint-id         = agentcoreEndpointDevelopment
+├── memory-store-id           = agenticRagMemoryTokyo-6b6TlgDbol
+├── knowledge-base-id         = SWVG9LBC5K
+├── data-source-id            = NVVOAWSESK
+├── opensearch-collection-arn = arn:aws:aoss:ap-northeast-1:226484346947:collection/sj4efp9xypof1exox2ji
+├── agentcore-region          = ap-northeast-1
+├── bedrock-model-id          = us.amazon.nova-pro-v1:0
+├── ecr-repository-uri        = 226484346947.dkr.ecr.ap-northeast-1.amazonaws.com/agentic-rag-agent-development
+└── environment               = development
 ```
 
 ---
@@ -73,19 +80,38 @@
 │  │  agenticRagMemoryTokyo...   │◀──▶│  agentcoreEndpoint...       │ │
 │  │  Status: ACTIVE             │    │  Status: READY              │ │
 │  └─────────────────────────────┘    └─────────────────────────────┘ │
-│                                                                      │
-│  ┌─────────────────────────────┐    ┌─────────────────────────────┐ │
-│  │  DynamoDB                   │    │  S3 Buckets                 │ │
-│  │  - Events (Event Sourcing)  │    │  - Documents                │ │
-│  │  - ReadModels (CQRS)        │    │  - Vectors (Knowledge Base) │ │
+│                                                  │                   │
+│  ┌─────────────────────────────┐                │                   │
+│  │  Knowledge Base (RAG)       │◀───────────────┘                   │
+│  │  ID: SWVG9LBC5K             │                                    │
+│  │  Status: ACTIVE             │                                    │
+│  └───────────┬─────────────────┘                                    │
+│              │                                                       │
+│  ┌───────────▼─────────────────┐    ┌─────────────────────────────┐ │
+│  │  OpenSearch Serverless      │    │  S3 Buckets                 │ │
+│  │  (Vector Store)             │◀───│  - Documents (Data Source)  │ │
+│  │  agentcore-kb-dev           │    │  - Vectors                  │ │
 │  └─────────────────────────────┘    └─────────────────────────────┘ │
 │                                                                      │
-│  ┌─────────────────────────────┐                                    │
-│  │  Cognito User Pool          │                                    │
-│  │  Authentication             │                                    │
-│  └─────────────────────────────┘                                    │
+│  ┌─────────────────────────────┐    ┌─────────────────────────────┐ │
+│  │  DynamoDB                   │    │  Cognito User Pool          │ │
+│  │  - Events (Event Sourcing)  │    │  Authentication             │ │
+│  │  - ReadModels (CQRS)        │    │                             │ │
+│  └─────────────────────────────┘    └─────────────────────────────┘ │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## RAG パイプライン
+
+```
+1. ドキュメントアップロード
+   S3 (Documents) → Data Source → Knowledge Base → OpenSearch (Vector Index)
+
+2. クエリ実行
+   User Query → Agent Runtime → Knowledge Base (Retrieve) → LLM (Generate) → Response
 ```
 
 ---
@@ -94,7 +120,6 @@
 
 | コンポーネント | 理由 | 優先度 |
 |--------------|------|--------|
-| Knowledge Base (S3 Vector) | 追加設定が必要 | 中 |
 | Gateway | roleArn, authorizerType が必要 | 低 (オプション) |
 | Amplify Frontend | フロントエンドデプロイ待ち | 後続タスク |
 
@@ -110,10 +135,8 @@
    - Push to ECR (ap-northeast-1)
 
 2. **デプロイスクリプト**
-   - `scripts/deploy-agentcore-full.py`
-   - Agent Runtime 作成
-   - Endpoint 作成
-   - SSM パラメータ更新
+   - `scripts/deploy-agentcore-full.py` - AgentCore Runtime/Endpoint
+   - `scripts/create-knowledge-base.py` - Knowledge Base/OpenSearch
 
 ---
 
@@ -122,13 +145,15 @@
 1. **フロントエンド (Amplify/Next.js)**
    - Cognito 認証統合
    - AgentCore Endpoint への接続
+   - RAG UI 実装
 
-2. **Knowledge Base 設定**
-   - S3 Vector 設定
-
-3. **監視・ロギング**
+2. **監視・ロギング**
    - CloudWatch Logs 設定
    - X-Ray トレーシング
+
+3. **ドキュメント追加**
+   - S3 Documents バケットにファイルアップロード
+   - Knowledge Base インジェスト実行
 
 ---
 
@@ -136,5 +161,6 @@
 
 | 日時 | 変更内容 |
 |-----|---------|
+| 2025-12-07 16:00 | Knowledge Base + OpenSearch Serverless 追加 |
 | 2025-12-07 15:45 | us-east-1 → ap-northeast-1 に移行 |
 | 2025-12-07 15:30 | 初回デプロイ (us-east-1) |
