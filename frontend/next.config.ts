@@ -1,18 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Amplify Hosting handles the output configuration automatically
-  // output: "standalone", 
+  // Static export for Amplify Hosting
+  output: "export",
   experimental: {
     optimizePackageImports: ["lucide-react", "framer-motion"],
   },
   images: {
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "**",
-      },
-    ],
+    unoptimized: true, // Required for static export
   },
 };
 
