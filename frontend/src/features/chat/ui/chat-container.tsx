@@ -72,7 +72,6 @@ export function ChatContainer({ agentId, className }: ChatContainerProps) {
     regenerate,
   } = useChatStream({
     config: agentCoreConfig,
-    streamMode: 'sse',
     sessionId,
     userId: user?.userId || 'anonymous',
     tenantId: user?.tenantId,

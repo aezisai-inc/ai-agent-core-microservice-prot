@@ -1,5 +1,7 @@
 /**
  * AgentCore Client Tests
+ * 
+ * AWS SDK を使用した AgentCore クライアントのテスト
  */
 
 import {
@@ -9,143 +11,177 @@ import {
   getAgentCoreClient,
 } from '../api/agentcore-client';
 
-// Mock fetch
-const mockFetch = jest.fn();
-global.fetch = mockFetch;
+// TextEncoder polyfill for Jest
+global.TextEncoder = require('util').TextEncoder;
+global.TextDecoder = require('util').TextDecoder;
+
+// Mock AWS SDK
+const mockSend = jest.fn();
+jest.mock('@aws-sdk/client-bedrock-agent-runtime', () => ({
+  BedrockAgentRuntimeClient: jest.fn().mockImplementation(() => ({
+    send: mockSend,
+  })),
+  InvokeAgentCommand: jest.fn(),
+}));
+
+jest.mock('@aws-sdk/credential-providers', () => ({
+  fromCognitoIdentityPool: jest.fn().mockReturnValue({}),
+}));
+
+jest.mock('aws-amplify/auth', () => ({
+  fetchAuthSession: jest.fn().mockResolvedValue({
+    tokens: {
+      idToken: {
+        toString: () => 'mock-id-token',
+      },
+    },
+  }),
+}));
 
 describe('AgentCoreClient', () => {
-  let client: AgentCoreClient;
+  const defaultConfig = {
+    region: 'ap-northeast-1',
+    agentRuntimeId: 'test-runtime-id',
+    agentEndpointId: 'test-endpoint-id',
+    identityPoolId: 'test-identity-pool-id',
+    userPoolId: 'test-user-pool-id',
+  };
 
   beforeEach(() => {
-    mockFetch.mockClear();
-    client = new AgentCoreClient({
-      endpoint: 'https://agentcore.example.com',
-      authToken: 'test-token',
-      timeout: 5000,
-      maxRetries: 2,
-    });
+    jest.clearAllMocks();
+    mockSend.mockReset();
   });
 
   describe('constructor', () => {
     it('should create client with config', () => {
+      const client = new AgentCoreClient(defaultConfig);
       expect(client).toBeInstanceOf(AgentCoreClient);
-    });
-
-    it('should use default values for optional config', () => {
-      const minimalClient = new AgentCoreClient({
-        endpoint: 'https://example.com',
-      });
-      expect(minimalClient).toBeInstanceOf(AgentCoreClient);
     });
   });
 
-  describe('setAuthToken', () => {
-    it('should update auth token', () => {
-      client.setAuthToken('new-token');
-      // Token is private, so we verify by checking the header in a request
-      // This is implicitly tested in the invoke tests
-      expect(true).toBe(true);
+  describe('stream', () => {
+    it('should yield text chunks from completion', async () => {
+      // Mock async iterable completion
+      const mockCompletion = {
+        [Symbol.asyncIterator]: async function* () {
+          yield {
+            chunk: {
+              bytes: new TextEncoder().encode('Hello '),
+            },
+          };
+          yield {
+            chunk: {
+              bytes: new TextEncoder().encode('World'),
+            },
+          };
+        },
+      };
+
+      mockSend.mockResolvedValue({
+        completion: mockCompletion,
+      });
+
+      const client = new AgentCoreClient(defaultConfig);
+      const chunks: string[] = [];
+      
+      for await (const chunk of client.stream({
+        sessionId: 'test-session',
+        userId: 'test-user',
+        prompt: 'Hello',
+      })) {
+        if (chunk.type === 'text' && chunk.content) {
+          chunks.push(chunk.content);
+        }
+      }
+
+      expect(chunks.join('')).toBe('Hello World');
+    });
+
+    it('should yield error on API failure', async () => {
+      mockSend.mockRejectedValue(new Error('API Error'));
+
+      const client = new AgentCoreClient(defaultConfig);
+      let errorChunk = null;
+      
+      for await (const chunk of client.stream({
+        sessionId: 'test-session',
+        userId: 'test-user',
+        prompt: 'Hello',
+      })) {
+        if (chunk.type === 'error') {
+          errorChunk = chunk;
+        }
+      }
+
+      expect(errorChunk).not.toBeNull();
+      expect(errorChunk?.error).toContain('API Error');
+    });
+
+    it('should yield end chunk when stream completes', async () => {
+      const mockCompletion = {
+        [Symbol.asyncIterator]: async function* () {
+          yield {
+            chunk: {
+              bytes: new TextEncoder().encode('Done'),
+            },
+          };
+        },
+      };
+
+      mockSend.mockResolvedValue({
+        completion: mockCompletion,
+      });
+
+      const client = new AgentCoreClient(defaultConfig);
+      let endChunk = null;
+      
+      for await (const chunk of client.stream({
+        sessionId: 'test-session',
+        userId: 'test-user',
+        prompt: 'Hello',
+      })) {
+        if (chunk.type === 'end') {
+          endChunk = chunk;
+        }
+      }
+
+      expect(endChunk).not.toBeNull();
+      expect(endChunk?.latencyMs).toBeDefined();
     });
   });
 
   describe('invoke', () => {
-    it('should make POST request with correct payload', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          response: 'Hello!',
-          tokens_used: 100,
-          latency_ms: 500,
-          tools_used: ['search'],
-          sources: [],
-        }),
+    it('should return aggregated response', async () => {
+      const mockCompletion = {
+        [Symbol.asyncIterator]: async function* () {
+          yield {
+            chunk: {
+              bytes: new TextEncoder().encode('Complete response'),
+            },
+          };
+        },
+      };
+
+      mockSend.mockResolvedValue({
+        completion: mockCompletion,
       });
 
+      const client = new AgentCoreClient(defaultConfig);
       const result = await client.invoke({
-        sessionId: 'sess-1',
-        userId: 'user-1',
+        sessionId: 'test-session',
+        userId: 'test-user',
         prompt: 'Hello',
       });
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://agentcore.example.com/invoke',
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer test-token',
-          }),
-        })
-      );
-
-      expect(result).toEqual({
-        response: 'Hello!',
-        tokensUsed: 100,
-        latencyMs: 500,
-        toolsUsed: ['search'],
-        sources: [],
-      });
-    });
-
-    it('should throw AgentCoreError on failure', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        statusText: 'Internal Server Error',
-      });
-
-      await expect(
-        client.invoke({
-          sessionId: 'sess-1',
-          userId: 'user-1',
-          prompt: 'Hello',
-        })
-      ).rejects.toThrow(AgentCoreError);
-    });
-
-    it('should include tenantId when provided', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          response: 'Hello!',
-          tokens_used: 50,
-        }),
-      });
-
-      await client.invoke({
-        sessionId: 'sess-1',
-        userId: 'user-1',
-        tenantId: 'tenant-1',
-        prompt: 'Hello',
-      });
-
-      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(body.tenant_id).toBe('tenant-1');
-    });
-
-    it('should retry on failure', async () => {
-      mockFetch
-        .mockRejectedValueOnce(new Error('Network error'))
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ response: 'Success' }),
-        });
-
-      const result = await client.invoke({
-        sessionId: 'sess-1',
-        userId: 'user-1',
-        prompt: 'Hello',
-      });
-
-      expect(mockFetch).toHaveBeenCalledTimes(2);
-      expect(result.response).toBe('Success');
+      expect(result.response).toBe('Complete response');
+      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
     });
   });
 
-  describe('cancelStream', () => {
-    it('should abort the stream', () => {
-      // cancelStream is tested by checking it doesn't throw
-      expect(() => client.cancelStream()).not.toThrow();
+  describe('reset', () => {
+    it('should reset client state without error', () => {
+      const client = new AgentCoreClient(defaultConfig);
+      expect(() => client.reset()).not.toThrow();
     });
   });
 });
@@ -160,22 +196,21 @@ describe('AgentCoreError', () => {
 });
 
 describe('Singleton functions', () => {
-  beforeEach(() => {
-    // Reset singleton
-    jest.resetModules();
-  });
+  const config = {
+    region: 'ap-northeast-1',
+    agentRuntimeId: 'test-runtime-id',
+    agentEndpointId: 'test-endpoint-id',
+    identityPoolId: 'test-identity-pool-id',
+    userPoolId: 'test-user-pool-id',
+  };
 
   it('initAgentCoreClient should create and return client', () => {
-    const client = initAgentCoreClient({
-      endpoint: 'https://test.com',
-    });
+    const client = initAgentCoreClient(config);
     expect(client).toBeInstanceOf(AgentCoreClient);
   });
 
   it('getAgentCoreClient should return initialized client', () => {
-    initAgentCoreClient({
-      endpoint: 'https://test.com',
-    });
+    initAgentCoreClient(config);
     const client = getAgentCoreClient();
     expect(client).toBeInstanceOf(AgentCoreClient);
   });
