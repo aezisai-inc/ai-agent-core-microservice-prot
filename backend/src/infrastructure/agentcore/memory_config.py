@@ -42,6 +42,7 @@ class MemoryConfig(BaseSettings):
     # Session Settings
     session_timeout_minutes: int = 30
     max_messages_per_session: int = 100
+    max_session_messages: int = 20  # プロンプトに含める最大メッセージ数
 
     class Config:
         env_prefix = "AGENTCORE_MEMORY_"
