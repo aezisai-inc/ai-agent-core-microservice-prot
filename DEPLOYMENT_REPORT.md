@@ -1,6 +1,5 @@
 # AgentCore + S3 Vectors デプロイメントレポート
 
-**デプロイ日時**: 2025-12-07
 **リージョン**: ap-northeast-1 (東京)
 **環境**: development
 
@@ -10,10 +9,10 @@
 
 | リソース | 値 |
 |---------|-----|
-| Vector Bucket | `agentcore-kb-vectors-development` |
-| Vector Bucket ARN | `arn:aws:s3vectors:ap-northeast-1:226484346947:bucket/agentcore-kb-vectors-development` |
+| Vector Bucket | `agentcore-kb-vectors-${ENVIRONMENT}` |
+| Vector Bucket ARN | `arn:aws:s3vectors:${REGION}:${ACCOUNT_ID}:bucket/agentcore-kb-vectors-${ENVIRONMENT}` |
 | Vector Index | `agentcore-kb-index` |
-| Vector Index ARN | `arn:aws:s3vectors:ap-northeast-1:226484346947:bucket/agentcore-kb-vectors-development/index/agentcore-kb-index` |
+| Vector Index ARN | `arn:aws:s3vectors:${REGION}:${ACCOUNT_ID}:bucket/.../index/agentcore-kb-index` |
 | Dimension | 1024 (Titan Embed Text v2) |
 | Distance Metric | cosine |
 
@@ -23,8 +22,8 @@
 
 | リソース | 値 |
 |---------|-----|
-| Knowledge Base ID | `KCOEXQD1NV` |
-| Knowledge Base ARN | `arn:aws:bedrock:ap-northeast-1:226484346947:knowledge-base/KCOEXQD1NV` |
+| Knowledge Base ID | SSMパラメータ参照 |
+| Knowledge Base ARN | `arn:aws:bedrock:${REGION}:${ACCOUNT_ID}:knowledge-base/${KB_ID}` |
 | Status | `ACTIVE` |
 | Storage Type | S3_VECTORS |
 | Embedding Model | amazon.titan-embed-text-v2:0 |
@@ -33,8 +32,8 @@
 
 | リソース | 値 |
 |---------|-----|
-| Data Source ID | `R1BW5OB1WP` |
-| Source Bucket | `agentcore-documents-226484346947-development` |
+| Data Source ID | SSMパラメータ参照 |
+| Source Bucket | `agentcore-documents-${ACCOUNT_ID}-${ENVIRONMENT}` |
 | Inclusion Prefix | `documents/` |
 | Chunking Strategy | FIXED_SIZE (512 tokens, 20% overlap) |
 
@@ -42,36 +41,37 @@
 
 | リソース | 値 |
 |---------|-----|
-| Runtime Name | `agentcoreRuntimeDevelopment` |
-| Runtime ARN | (SSMパラメータ参照) |
+| Runtime Name | `agentcoreRuntime${Environment}` |
+| Runtime ARN | SSMパラメータ参照 |
 | Region | ap-northeast-1 |
-| ECR Repository | `agentic-rag-agent-development` |
+| ECR Repository | `agentic-rag-agent-${ENVIRONMENT}` |
 
 ### 5. AgentCore Memory
 
 | リソース | 値 |
 |---------|-----|
-| Memory Store ID | `mem_01jensb3j9e3q1hpws0b0gd15r` |
+| Memory Store ID | SSMパラメータ参照 |
 | Strategies | Short-term, Episodic, Semantic |
 
 ### 6. CDK管理リソース
 
 | リソース | 値 |
 |---------|-----|
-| Events Table | `agentic-rag-events-development` |
-| Read Models Table | `agentic-rag-read-models-development` |
-| Documents Bucket | `agentcore-documents-226484346947-development` |
-| User Pool ID | (Cognito) |
+| Events Table | `agentic-rag-events-${ENVIRONMENT}` |
+| Read Models Table | `agentic-rag-read-models-${ENVIRONMENT}` |
+| Documents Bucket | `agentcore-documents-${ACCOUNT_ID}-${ENVIRONMENT}` |
+| User Pool ID | Cognito (CDKで自動生成) |
 
 ## SSM パラメータ一覧
 
 ```
-/agentcore/development/knowledge-base-id: KCOEXQD1NV
-/agentcore/development/knowledge-base-arn: arn:aws:bedrock:ap-northeast-1:...
-/agentcore/development/data-source-id: R1BW5OB1WP
-/agentcore/development/vector-bucket: agentcore-kb-vectors-development
-/agentcore/development/agentcore-region: ap-northeast-1
-/agentcore/development/agent-endpoint-id-tokyo: agentcoreEndpointDevelopment
+/agentcore/${ENVIRONMENT}/knowledge-base-id
+/agentcore/${ENVIRONMENT}/knowledge-base-arn
+/agentcore/${ENVIRONMENT}/data-source-id
+/agentcore/${ENVIRONMENT}/vector-bucket
+/agentcore/${ENVIRONMENT}/agentcore-region
+/agentcore/${ENVIRONMENT}/agent-endpoint-id
+/agentcore/${ENVIRONMENT}/memory-store-id
 ```
 
 ## アーキテクチャ図
@@ -94,9 +94,9 @@
 │  │ AgentCore       │      │  Bedrock KB         │    │ AgentCore    ││
 │  │ Memory          │      │  + S3 Vectors       │    │ Observability││
 │  │                 │      │                     │    │              ││
-│  │ - Short-term    │      │  ID: KCOEXQD1NV     │    │ - CloudWatch ││
-│  │ - Episodic      │      │  Storage: S3_VECTORS│    │ - X-Ray      ││
-│  │ - Semantic      │      │  Cost: ~$10/月      │    │              ││
+│  │ - Short-term    │      │  Storage: S3_VECTORS│    │ - CloudWatch ││
+│  │ - Episodic      │      │  Cost: ~$10/月      │    │ - X-Ray      ││
+│  │ - Semantic      │      │                     │    │              ││
 │  └─────────────────┘      └─────────────────────┘    └──────────────┘│
 │                                    │                                  │
 │                                    ▼                                  │
@@ -132,24 +132,40 @@
 ## ドキュメントアップロード & インジェスト方法
 
 ```bash
+# 環境変数を設定
+export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export ENVIRONMENT=development
+export KB_ID=$(aws ssm get-parameter --name /agentcore/${ENVIRONMENT}/knowledge-base-id --query Parameter.Value --output text)
+export DS_ID=$(aws ssm get-parameter --name /agentcore/${ENVIRONMENT}/data-source-id --query Parameter.Value --output text)
+
 # 1. ドキュメントをS3にアップロード
-aws s3 cp ./docs/ s3://agentcore-documents-226484346947-development/documents/ --recursive
+aws s3 cp ./docs/ s3://agentcore-documents-${ACCOUNT_ID}-${ENVIRONMENT}/documents/ --recursive
 
 # 2. Knowledge Base インジェスト開始
 aws bedrock-agent start-ingestion-job \
-  --knowledge-base-id KCOEXQD1NV \
-  --data-source-id R1BW5OB1WP
+  --knowledge-base-id ${KB_ID} \
+  --data-source-id ${DS_ID}
 ```
 
 ## 検索テスト方法
 
 ```python
 import boto3
+import os
 
+# SSMから設定を取得
+ssm = boto3.client('ssm')
+environment = os.getenv('ENVIRONMENT', 'development')
+
+kb_id = ssm.get_parameter(
+    Name=f'/agentcore/{environment}/knowledge-base-id'
+)['Parameter']['Value']
+
+# 検索実行
 client = boto3.client('bedrock-agent-runtime', region_name='ap-northeast-1')
 
 response = client.retrieve(
-    knowledgeBaseId='KCOEXQD1NV',
+    knowledgeBaseId=kb_id,
     retrievalQuery={'text': 'テスト検索クエリ'},
     retrievalConfiguration={
         'vectorSearchConfiguration': {
@@ -164,3 +180,22 @@ for result in response['retrievalResults']:
     print()
 ```
 
+## 環境変数テンプレート (.env.example)
+
+```bash
+# AWS Settings
+APP_AWS_REGION=ap-northeast-1
+APP_ENVIRONMENT=development
+
+# Bedrock Knowledge Base (取得方法: aws ssm get-parameter)
+APP_KNOWLEDGE_BASE_ID=<SSMから取得>
+APP_DATA_SOURCE_ID=<SSMから取得>
+
+# AgentCore
+APP_AGENT_RUNTIME_NAME=agentcoreRuntime<Environment>
+APP_AGENT_ENDPOINT_ID=<SSMから取得>
+APP_MEMORY_STORE_ID=<SSMから取得>
+
+# Model
+APP_DEFAULT_MODEL_ID=us.amazon.nova-pro-v1:0
+```
