@@ -30,6 +30,8 @@ SYSTEM_PROMPT = """あなたは優秀なカスタマーサポートアシスタ�
 
 SYSTEM_PROMPT_WITH_CONTEXT_TEMPLATE = """{base_prompt}
 
+{rag_context}
+
 {episodic_context}
 
 {reflection_context}
@@ -47,11 +49,12 @@ def build_system_prompt(
     tenant_id: str = "",
     episodic_context: str = "",
     reflection_context: str = "",
+    rag_context: str = "",
     base_prompt: str | None = None,
 ) -> str:
     """Build a context-aware system prompt.
     
-    Combines the base system prompt with episodic memory context
+    Combines the base system prompt with RAG context, episodic memory,
     and reflection insights for more informed responses.
     
     Args:
@@ -60,6 +63,7 @@ def build_system_prompt(
         tenant_id: Current tenant identifier
         episodic_context: Context built from similar past episodes
         reflection_context: Context built from reflections/insights
+        rag_context: Context from Knowledge Base RAG retrieval
         base_prompt: Optional custom base prompt (uses default if None)
     
     Returns:
@@ -68,11 +72,12 @@ def build_system_prompt(
     prompt = base_prompt or SYSTEM_PROMPT
     
     # If no context, return base prompt
-    if not episodic_context and not reflection_context:
+    if not episodic_context and not reflection_context and not rag_context:
         return prompt
     
     return SYSTEM_PROMPT_WITH_CONTEXT_TEMPLATE.format(
         base_prompt=prompt,
+        rag_context=rag_context or "",
         episodic_context=episodic_context or "",
         reflection_context=reflection_context or "",
         session_id=session_id or "N/A",

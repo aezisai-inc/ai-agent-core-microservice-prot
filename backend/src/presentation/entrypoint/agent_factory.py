@@ -82,11 +82,23 @@ class AgentFactory:
         # Create tools with dependencies
         tools = self._create_tools(tenant_id)
         
+        # Get S3Vector client for RAG
+        s3vector_client = None
+        try:
+            s3vector_client = self._container.s3vector_client
+        except Exception as e:
+            logger.warning(
+                "s3vector_client_not_available",
+                error=str(e),
+                message="RAG retrieval will be disabled"
+            )
+        
         logger.info(
             "creating_strands_agent",
             model_id=config.model_id,
             tool_count=len(tools),
             tenant_id=tenant_id,
+            rag_enabled=s3vector_client is not None,
         )
         
         return StrandsAgentWrapper(
@@ -94,6 +106,7 @@ class AgentFactory:
             tools=tools,
             episodic_service=self._container.episodic_memory_service,
             reflection_service=self._container.reflection_service,
+            s3vector_client=s3vector_client,
         )
     
     def _create_tools(self, tenant_id: str | None = None) -> list[Callable[..., Any]]:
@@ -107,12 +120,19 @@ class AgentFactory:
         """
         tools: list[Callable[..., Any]] = []
         
-        # Knowledge base search tool
-        # Note: vector_client would come from container in real implementation
-        # tools.append(create_knowledge_tool(
-        #     vector_client=self._container.vector_client,
-        #     tenant_id=tenant_id,
-        # ))
+        # Knowledge base search tool (S3 Vectors)
+        try:
+            tools.append(create_knowledge_tool(
+                vector_client=self._container.s3vector_client,
+                tenant_id=tenant_id,
+            ))
+            logger.info("knowledge_tool_registered", tenant_id=tenant_id)
+        except Exception as e:
+            logger.warning(
+                "knowledge_tool_registration_failed",
+                error=str(e),
+                message="Knowledge Base tool disabled - check S3Vector client configuration"
+            )
         
         return tools
 
@@ -121,6 +141,7 @@ class StrandsAgentWrapper:
     """Wrapper around Strands Agent with memory integration.
     
     This wrapper provides:
+    - RAG (Knowledge Base) context injection
     - Episodic memory context injection
     - Reflection-based guidance
     - Streaming response handling
@@ -136,6 +157,7 @@ class StrandsAgentWrapper:
         tools: list[Callable[..., Any]],
         episodic_service: Any,
         reflection_service: Any,
+        s3vector_client: Any = None,
     ):
         """Initialize the agent wrapper.
         
@@ -144,11 +166,13 @@ class StrandsAgentWrapper:
             tools: List of tool functions
             episodic_service: EpisodicMemoryService instance
             reflection_service: ReflectionService instance
+            s3vector_client: S3VectorClient for RAG retrieval
         """
         self._config = config
         self._tools = tools
         self._episodic_service = episodic_service
         self._reflection_service = reflection_service
+        self._s3vector_client = s3vector_client
         
         # In production, initialize actual Strands Agent:
         # from strands import Agent
@@ -178,7 +202,28 @@ class StrandsAgentWrapper:
         Returns:
             Response dictionary with content and metadata
         """
-        # 1. Retrieve episodic context
+        # 1. RAG: Retrieve relevant documents from Knowledge Base
+        rag_context = ""
+        rag_chunks = []
+        if self._s3vector_client:
+            try:
+                rag_results = await self._s3vector_client.search(
+                    query=prompt,
+                    tenant_id=tenant_id or "default",
+                    top_k=5,
+                )
+                rag_chunks = rag_results
+                if rag_results:
+                    rag_context = self._build_rag_context(rag_results)
+                    logger.info(
+                        "rag_context_retrieved",
+                        chunk_count=len(rag_results),
+                        session_id=session_id,
+                    )
+            except Exception as e:
+                logger.warning("rag_retrieval_failed", error=str(e))
+        
+        # 2. Retrieve episodic context
         episodes = await self._episodic_service.retrieve_similar_episodes(
             user_id=user_id,
             query=prompt,
@@ -186,7 +231,7 @@ class StrandsAgentWrapper:
         )
         episodic_context = self._episodic_service.build_episode_context(episodes)
         
-        # 2. Retrieve reflection context
+        # 3. Retrieve reflection context
         reflections = await self._reflection_service.retrieve_relevant_reflections(
             user_id=user_id,
             use_case=prompt,
@@ -194,7 +239,7 @@ class StrandsAgentWrapper:
         )
         reflection_context = self._reflection_service.build_reflection_prompt(reflections)
         
-        # 3. Build enriched system prompt
+        # 4. Build enriched system prompt with RAG context
         from src.presentation.entrypoint.prompts import build_system_prompt
         enriched_prompt = build_system_prompt(
             session_id=session_id,
@@ -202,15 +247,18 @@ class StrandsAgentWrapper:
             tenant_id=tenant_id or "",
             episodic_context=episodic_context,
             reflection_context=reflection_context,
+            rag_context=rag_context,
             base_prompt=self._config.system_prompt,
         )
         
-        # 4. Invoke agent (placeholder - would use actual Strands Agent)
+        # 5. Invoke agent (placeholder - would use actual Strands Agent)
         # response = await self._agent.ainvoke(prompt)
         response_content = f"[Agent Response to: {prompt[:50]}...]"
+        if rag_context:
+            response_content += f"\n\n[RAG Context: {len(rag_chunks)} chunks retrieved]"
         tool_calls: list[dict[str, Any]] = []
         
-        # 5. Save interaction for episode detection
+        # 6. Save interaction for episode detection
         await self._episodic_service.save_interaction(
             session_id=session_id,
             user_id=user_id,
@@ -226,6 +274,7 @@ class StrandsAgentWrapper:
             user_id=user_id,
             episodes_used=len(episodes),
             reflections_used=len(reflections),
+            rag_chunks_used=len(rag_chunks),
         )
         
         return {
@@ -233,7 +282,31 @@ class StrandsAgentWrapper:
             "tool_calls": tool_calls,
             "episodes_used": len(episodes),
             "reflections_used": len(reflections),
+            "rag_chunks_used": len(rag_chunks),
         }
+    
+    def _build_rag_context(self, chunks: list[dict[str, Any]]) -> str:
+        """Build RAG context from retrieved chunks.
+        
+        Args:
+            chunks: List of retrieved document chunks
+        
+        Returns:
+            Formatted context string for the prompt
+        """
+        if not chunks:
+            return ""
+        
+        context_parts = ["## 関連ドキュメント (Knowledge Base):\n"]
+        for i, chunk in enumerate(chunks[:5], 1):
+            content = chunk.get("content", "")[:500]
+            source = chunk.get("source", "Unknown")
+            score = chunk.get("score", 0.0)
+            context_parts.append(f"### Document {i} (Score: {score:.2f})")
+            context_parts.append(f"Source: {source}")
+            context_parts.append(f"{content}\n")
+        
+        return "\n".join(context_parts)
     
     async def stream(
         self,
@@ -255,20 +328,42 @@ class StrandsAgentWrapper:
         Yields:
             Response chunks (strings)
         """
-        # 1. Retrieve context (same as invoke)
+        # 1. RAG: Retrieve relevant documents from Knowledge Base
+        rag_context = ""
+        rag_chunk_count = 0
+        if self._s3vector_client:
+            try:
+                rag_results = await self._s3vector_client.search(
+                    query=prompt,
+                    tenant_id=tenant_id or "default",
+                    top_k=5,
+                )
+                rag_chunk_count = len(rag_results)
+                if rag_results:
+                    rag_context = self._build_rag_context(rag_results)
+                    logger.info(
+                        "rag_context_retrieved_for_stream",
+                        chunk_count=rag_chunk_count,
+                        session_id=session_id,
+                    )
+            except Exception as e:
+                logger.warning("rag_retrieval_failed_stream", error=str(e))
+        
+        # 2. Retrieve episodic context
         episodes = await self._episodic_service.retrieve_similar_episodes(
             user_id=user_id,
             query=prompt,
             tenant_id=tenant_id,
         )
         
+        # 3. Retrieve reflection context
         reflections = await self._reflection_service.retrieve_relevant_reflections(
             user_id=user_id,
             use_case=prompt,
             tenant_id=tenant_id,
         )
         
-        # 2. Stream response (placeholder)
+        # 4. Stream response (placeholder)
         # In production: async for chunk in self._agent.stream_async(prompt):
         full_response = ""
         chunks = [
@@ -276,16 +371,30 @@ class StrandsAgentWrapper:
             "ありがとう",
             "ございます。",
             "\n\n",
+        ]
+        
+        # Add RAG-based response if context available
+        if rag_context:
+            chunks.extend([
+                f"Knowledge Baseから",
+                f"{rag_chunk_count}件の",
+                "関連ドキュメントを",
+                "参照して",
+                "お答えします。",
+                "\n\n",
+            ])
+        
+        chunks.extend([
             f"ご質問「{prompt[:30]}...」",
             "について",
             "お答えします。",
-        ]
+        ])
         
         for chunk in chunks:
             full_response += chunk
             yield chunk
         
-        # 3. Save interaction after streaming completes
+        # 5. Save interaction after streaming completes
         await self._episodic_service.save_interaction(
             session_id=session_id,
             user_id=user_id,
@@ -300,6 +409,9 @@ class StrandsAgentWrapper:
             session_id=session_id,
             user_id=user_id,
             response_length=len(full_response),
+            rag_chunks_used=rag_chunk_count,
+            episodes_used=len(episodes),
+            reflections_used=len(reflections),
         )
 
 
