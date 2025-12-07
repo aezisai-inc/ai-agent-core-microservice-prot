@@ -23,7 +23,8 @@ import json
 from typing import Optional
 
 # Configuration
-AGENTCORE_REGION = "us-east-1"  # AgentCore is only available in us-east-1
+# AgentCore is now GA in ap-northeast-1 (Tokyo)
+AGENTCORE_REGION = os.environ.get("AGENTCORE_REGION", "ap-northeast-1")
 INFRA_REGION = os.environ.get("AWS_DEFAULT_REGION", "ap-northeast-1")
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
 ACCOUNT_ID = boto3.client("sts").get_caller_identity()["Account"]
@@ -325,13 +326,8 @@ def main():
     print("=" * 60)
     
     # Get prerequisites from SSM
-    # Use us-east-1 ECR URI since AgentCore only runs in us-east-1
-    ecr_uri = get_ssm_parameter(f"/agentcore/{ENVIRONMENT}/ecr-repository-uri-useast1")
-    if not ecr_uri:
-        # Fallback: construct the us-east-1 URI from ap-northeast-1 URI
-        ap_ecr_uri = get_ssm_parameter(f"/agentcore/{ENVIRONMENT}/ecr-repository-uri")
-        if ap_ecr_uri:
-            ecr_uri = ap_ecr_uri.replace("ap-northeast-1", "us-east-1")
+    # AgentCore is now GA in ap-northeast-1, use local ECR
+    ecr_uri = get_ssm_parameter(f"/agentcore/{ENVIRONMENT}/ecr-repository-uri")
     memory_store_id = get_ssm_parameter(f"/agentcore/{ENVIRONMENT}/memory-store-id")
     
     if not ecr_uri:
