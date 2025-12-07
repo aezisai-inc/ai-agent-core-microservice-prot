@@ -45,22 +45,23 @@ export class EcrStack extends cdk.Stack {
       maxImageAge: cdk.Duration.days(1),
     });
 
-    this.agentRepository.addLifecycleRule({
-      description: 'Keep limited number of images',
-      rulePriority: 2,
-      tagStatus: ecr.TagStatus.ANY,
-      maxImageCount: 10,
-    });
-
     // 開発環境用の追加ポリシー
     if (environment !== 'prod') {
       this.agentRepository.addLifecycleRule({
         description: 'Remove old development images',
-        rulePriority: 3,
+        rulePriority: 2,
         tagPrefixList: ['dev-', 'feature-'],
         maxImageAge: cdk.Duration.days(imageRetentionDays),
       });
     }
+
+    // TagStatus.ANY は常に最後（最大の優先度）にする必要がある
+    this.agentRepository.addLifecycleRule({
+      description: 'Keep limited number of images',
+      rulePriority: 100,
+      tagStatus: ecr.TagStatus.ANY,
+      maxImageCount: 10,
+    });
 
     // CodeBuild からのプッシュ権限
     this.agentRepository.grantPullPush(

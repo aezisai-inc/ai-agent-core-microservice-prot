@@ -4,7 +4,7 @@ import * as cdk from "aws-cdk-lib";
 import {
   AgenticRagStack,
   EcrStack,
-  MemoryStack,
+  // MemoryStack, // NOTE: AgentCore Memory は現在 Preview
   AgentCoreStack,
   PipelineStack,
 } from "../lib";
@@ -42,12 +42,13 @@ const ecrStack = new EcrStack(app, `AgenticRag-ECR-${environment}`, {
 });
 
 // 3. Memory スタック (AgentCore Memory Store)
-const memoryStack = new MemoryStack(app, `AgenticRag-Memory-${environment}`, {
-  env,
-  description: "AgentCore Memory Store",
-  tags,
-  environment,
-});
+// NOTE: AgentCore Memory は現在 Preview のため、一時的にスキップ
+// const memoryStack = new MemoryStack(app, `AgenticRag-Memory-${environment}`, {
+//   env,
+//   description: "AgentCore Memory Store",
+//   tags,
+//   environment,
+// });
 
 // 4. AgentCore スタック (IAM, SSM)
 const agentCoreStack = new AgentCoreStack(app, `AgenticRag-AgentCore-${environment}`, {
@@ -56,11 +57,11 @@ const agentCoreStack = new AgentCoreStack(app, `AgenticRag-AgentCore-${environme
   tags,
   environment,
   ecrRepository: ecrStack.agentRepository,
-  memoryStoreId: memoryStack.memoryStoreId,
+  memoryStoreId: "placeholder-memory-store", // TODO: AgentCore Memory GA 後に有効化
   bedrockModelId: process.env.BEDROCK_MODEL_ID || "us.amazon.nova-pro-v1:0",
 });
 agentCoreStack.addDependency(ecrStack);
-agentCoreStack.addDependency(memoryStack);
+// agentCoreStack.addDependency(memoryStack);
 
 // 5. Pipeline スタック (オプション - GitHub Connection が設定されている場合のみ)
 const githubConnectionArn = process.env.GITHUB_CONNECTION_ARN;
@@ -87,7 +88,6 @@ Region: ${env.region}
 Stacks:
   - AgenticRag-${environment} (Main)
   - AgenticRag-ECR-${environment}
-  - AgenticRag-Memory-${environment}
   - AgenticRag-AgentCore-${environment}
   ${githubConnectionArn ? `- AgenticRag-Pipeline-${environment}` : ""}
 `);
