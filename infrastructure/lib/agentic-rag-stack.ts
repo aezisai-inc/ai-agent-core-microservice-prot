@@ -9,6 +9,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as kms from 'aws-cdk-lib/aws-kms';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
 import { Construct } from 'constructs';
 
 export interface AgenticRagStackProps extends cdk.StackProps {
@@ -27,6 +28,10 @@ export class AgenticRagStack extends cdk.Stack {
   public readonly vectorBucket: s3.Bucket;
   /** 暗号化キー (KMS) */
   public readonly encryptionKey: kms.Key;
+  /** Cognito User Pool */
+  public readonly userPool: cognito.UserPool;
+  /** Cognito User Pool Client */
+  public readonly userPoolClient: cognito.UserPoolClient;
 
   constructor(scope: Construct, id: string, props?: AgenticRagStackProps) {
     super(scope, id, props);
@@ -141,6 +146,70 @@ export class AgenticRagStack extends cdk.Stack {
       autoDeleteObjects: environment !== 'prod',
     });
 
+    // ============================================
+    // Cognito User Pool (認証)
+    // ============================================
+
+    this.userPool = new cognito.UserPool(this, 'UserPool', {
+      userPoolName: `agentic-rag-users-${environment}`,
+      selfSignUpEnabled: true,
+      signInAliases: {
+        email: true,
+      },
+      autoVerify: {
+        email: true,
+      },
+      standardAttributes: {
+        email: {
+          required: true,
+          mutable: true,
+        },
+      },
+      customAttributes: {
+        tenant_id: new cognito.StringAttribute({ mutable: true }),
+        role: new cognito.StringAttribute({ mutable: true }),
+      },
+      passwordPolicy: {
+        minLength: 8,
+        requireLowercase: true,
+        requireUppercase: true,
+        requireDigits: true,
+        requireSymbols: false,
+      },
+      accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
+      removalPolicy: environment === 'prod'
+        ? cdk.RemovalPolicy.RETAIN
+        : cdk.RemovalPolicy.DESTROY,
+    });
+
+    // User Pool Client
+    this.userPoolClient = this.userPool.addClient('UserPoolClient', {
+      userPoolClientName: `agentic-rag-client-${environment}`,
+      authFlows: {
+        userPassword: true,
+        userSrp: true,
+      },
+      oAuth: {
+        flows: {
+          authorizationCodeGrant: true,
+        },
+        scopes: [
+          cognito.OAuthScope.OPENID,
+          cognito.OAuthScope.EMAIL,
+          cognito.OAuthScope.PROFILE,
+        ],
+        callbackUrls: [
+          'http://localhost:3000/auth/callback',
+          'https://app.example.com/auth/callback',
+        ],
+        logoutUrls: [
+          'http://localhost:3000/',
+          'https://app.example.com/',
+        ],
+      },
+      generateSecret: false, // SPAの場合はfalse
+    });
+
     // CloudFormation 出力
     new cdk.CfnOutput(this, 'EventsTableName', {
       value: this.eventsTable.tableName,
@@ -176,6 +245,24 @@ export class AgenticRagStack extends cdk.Stack {
       value: this.encryptionKey.keyArn,
       description: 'KMS Encryption Key ARN',
       exportName: `${environment}-EncryptionKeyArn`,
+    });
+
+    new cdk.CfnOutput(this, 'UserPoolId', {
+      value: this.userPool.userPoolId,
+      description: 'Cognito User Pool ID',
+      exportName: `${environment}-UserPoolId`,
+    });
+
+    new cdk.CfnOutput(this, 'UserPoolClientId', {
+      value: this.userPoolClient.userPoolClientId,
+      description: 'Cognito User Pool Client ID',
+      exportName: `${environment}-UserPoolClientId`,
+    });
+
+    new cdk.CfnOutput(this, 'UserPoolArn', {
+      value: this.userPool.userPoolArn,
+      description: 'Cognito User Pool ARN',
+      exportName: `${environment}-UserPoolArn`,
     });
   }
 }
