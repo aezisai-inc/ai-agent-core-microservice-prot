@@ -12,10 +12,10 @@
  * 環境変数の型定義
  */
 interface EnvironmentConfig {
-  /** AgentCore Runtime ID */
-  agentRuntimeId: string;
-  /** AgentCore Endpoint ID */
-  agentEndpointId: string;
+  /** AgentCore Runtime ARN */
+  agentRuntimeArn: string;
+  /** AgentCore Endpoint Name */
+  agentEndpointName: string;
   /** Cognito User Pool ID */
   cognitoUserPoolId: string;
   /** Cognito Client ID */
@@ -57,13 +57,13 @@ function validateEnvVar(name: string, value: string | undefined): string {
  */
 export function getConfig(): EnvironmentConfig {
   return {
-    agentRuntimeId: validateEnvVar(
-      'NEXT_PUBLIC_AGENT_RUNTIME_ID',
-      process.env.NEXT_PUBLIC_AGENT_RUNTIME_ID
+    agentRuntimeArn: validateEnvVar(
+      'NEXT_PUBLIC_AGENT_RUNTIME_ARN',
+      process.env.NEXT_PUBLIC_AGENT_RUNTIME_ARN
     ),
-    agentEndpointId: validateEnvVar(
-      'NEXT_PUBLIC_AGENT_ENDPOINT_ID',
-      process.env.NEXT_PUBLIC_AGENT_ENDPOINT_ID
+    agentEndpointName: validateEnvVar(
+      'NEXT_PUBLIC_AGENT_ENDPOINT_NAME',
+      process.env.NEXT_PUBLIC_AGENT_ENDPOINT_NAME
     ),
     cognitoUserPoolId: validateEnvVar(
       'NEXT_PUBLIC_COGNITO_USER_POOL_ID',
@@ -89,8 +89,8 @@ export function getAgentCoreConfig() {
   const config = getConfig();
   return {
     region: config.awsRegion,
-    agentRuntimeId: config.agentRuntimeId,
-    agentEndpointId: config.agentEndpointId,
+    agentRuntimeArn: config.agentRuntimeArn,
+    agentEndpointName: config.agentEndpointName,
     identityPoolId: config.cognitoIdentityPoolId,
     userPoolId: config.cognitoUserPoolId,
   };
@@ -116,8 +116,8 @@ export function isConfigValid(): boolean {
   try {
     const config = getConfig();
     return (
-      !config.agentRuntimeId.startsWith('PLACEHOLDER_') &&
-      !config.agentEndpointId.startsWith('PLACEHOLDER_') &&
+      !config.agentRuntimeArn.startsWith('PLACEHOLDER_') &&
+      !config.agentEndpointName.startsWith('PLACEHOLDER_') &&
       !config.cognitoUserPoolId.startsWith('PLACEHOLDER_') &&
       !config.cognitoClientId.startsWith('PLACEHOLDER_')
     );

@@ -15,10 +15,10 @@ import { fetchAuthSession } from "aws-amplify/auth";
 export interface AgentCoreConfig {
   /** AWS リージョン */
   region: string;
-  /** AgentCore Runtime ID (例: agentcoreRuntimeDevelopment-XXX) */
-  agentRuntimeId: string;
-  /** AgentCore Endpoint ID */
-  agentEndpointId: string;
+  /** AgentCore Runtime ARN */
+  agentRuntimeArn: string;
+  /** AgentCore Endpoint Name (qualifier) */
+  agentEndpointName: string;
   /** Cognito Identity Pool ID */
   identityPoolId: string;
   /** Cognito User Pool ID */
@@ -164,37 +164,37 @@ export class AgentCoreClient {
     try {
       const client = await this.getClient();
 
+      // payload を JSON -> Uint8Array に変換
+      const payloadData = {
+        prompt: params.prompt,
+        sessionId: params.sessionId,
+        userId: params.userId,
+        tenantId: params.tenantId,
+        context: params.context,
+      };
+      const payloadBytes = new TextEncoder().encode(JSON.stringify(payloadData));
+
       const command = new InvokeAgentRuntimeCommand({
-        runtimeIdentifier: this.config.agentRuntimeId,
-        runtimeEndpointName: this.config.agentEndpointId,
-        payload: {
-          prompt: params.prompt,
-          sessionId: params.sessionId,
-          userId: params.userId,
-          tenantId: params.tenantId,
-          context: params.context,
-        },
+        agentRuntimeArn: this.config.agentRuntimeArn,
+        qualifier: this.config.agentEndpointName,
+        runtimeSessionId: params.sessionId,
+        runtimeUserId: params.userId,
+        contentType: "application/json",
+        accept: "application/json",
+        payload: payloadBytes,
       });
 
       const response = await client.send(command);
 
       // ストリーミングレスポンスを処理
-      if (response.responseStream) {
-        for await (const event of response.responseStream) {
-          // テキストチャンク
-          if (event.chunk?.bytes) {
-            const text = new TextDecoder().decode(event.chunk.bytes);
-            fullResponse += text;
-            yield {
-              type: "text",
-              content: text,
-            };
-          }
-
-          // JSON形式のイベント
-          if (event.chunk?.bytes) {
+      if (response.response) {
+        // response は AsyncIterable<Uint8Array> の場合
+        if (typeof response.response[Symbol.asyncIterator] === 'function') {
+          for await (const chunk of response.response as AsyncIterable<Uint8Array>) {
+            const text = new TextDecoder().decode(chunk);
+            
+            // JSON形式のチャンクをパース試行
             try {
-              const text = new TextDecoder().decode(event.chunk.bytes);
               const data = JSON.parse(text);
               
               if (data.type === 'text' && data.content) {
@@ -211,21 +211,34 @@ export class AgentCoreClient {
                 };
               } else if (data.type === 'tool_result') {
                 yield { type: 'tool_result', toolResult: data.result };
+              } else if (data.content) {
+                // 汎用的なcontent
+                fullResponse += data.content;
+                yield { type: 'text', content: data.content };
+              } else if (typeof data === 'string') {
+                fullResponse += data;
+                yield { type: 'text', content: data };
               }
             } catch {
-              // JSONじゃない場合はテキストとして扱う（既に処理済み）
+              // JSONじゃない場合はテキストとして扱う
+              fullResponse += text;
+              yield { type: "text", content: text };
             }
           }
+        } else {
+          // 非ストリーミングレスポンス (Blob/Uint8Array)
+          const responseData = response.response as Uint8Array;
+          const text = new TextDecoder().decode(responseData);
+          
+          try {
+            const data = JSON.parse(text);
+            fullResponse = data.content || data.response || text;
+          } catch {
+            fullResponse = text;
+          }
+          
+          yield { type: "text", content: fullResponse };
         }
-      }
-
-      // 非ストリーミングレスポンス
-      if (response.output) {
-        const outputText = typeof response.output === 'string' 
-          ? response.output 
-          : JSON.stringify(response.output);
-        fullResponse = outputText;
-        yield { type: "text", content: outputText };
       }
 
       // ソースがあれば送信
