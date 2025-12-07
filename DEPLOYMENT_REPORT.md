@@ -1,191 +1,165 @@
-# デプロイレポート
+# AgentCore Deployment Report
 
-**日時**: 2024-12-07 12:44 JST  
-**リージョン**: ap-northeast-1  
-**環境**: development  
-**AWS Account**: 226484346947
+## デプロイ完了日時
+2025-12-07 15:45 JST
 
----
-
-## デプロイ結果サマリー
-
-| Stack | Status | 備考 |
-|-------|--------|------|
-| ✅ AgenticRag-development | 成功 | DynamoDB, S3, KMS |
-| ✅ AgenticRag-ECR-development | 成功 | ECR Repository |
-| ⚠️ AgenticRag-Memory-development | CDK失敗→CLI成功 | boto3で直接作成 |
-| ✅ AgenticRag-AgentCore-development | 成功 | IAM, SSM |
-
-### AgentCore Memory Store (手動作成)
-
-| 項目 | 値 |
-|-----|-----|
-| Memory ID | `agenticRagMemoryDevelopment-VIXDrsGejQ` |
-| ARN | `arn:aws:bedrock-agentcore:us-east-1:226484346947:memory/agenticRagMemoryDevelopment-VIXDrsGejQ` |
-| Region | `us-east-1` |
-| Event Expiry | 30日 |
-| SSM Parameter | `/agentcore/development/memory-store-id` |
+## 環境
+- **Environment**: development
+- **AgentCore Region**: us-east-1
+- **Infrastructure Region**: ap-northeast-1
+- **Account ID**: 226484346947
 
 ---
 
-## ✅ 成功したスタック
+## ✅ デプロイ済みリソース
 
-### 1. AgenticRag-development (メインスタック)
+### 1. インフラストラクチャ (CDK)
 
-| リソース | ARN / 名前 |
-|---------|-----------|
-| Documents Bucket | `agentcore-documents-226484346947-development` |
-| Vector Bucket | `agentcore-vectors-226484346947-development` |
-| Events Table | `agentic-rag-events-development` |
-| Read Models Table | `agentic-rag-read-models-development` |
-| Encryption Key | `arn:aws:kms:ap-northeast-1:226484346947:key/5daebe7a-5bb6-4dfe-b2e7-871bcce7c162` |
+| リソース | 名前/ID | リージョン | ステータス |
+|---------|---------|-----------|----------|
+| DynamoDB (Events) | agentic-rag-events-development | ap-northeast-1 | ✅ ACTIVE |
+| DynamoDB (ReadModels) | agentic-rag-read-models-development | ap-northeast-1 | ✅ ACTIVE |
+| S3 (Documents) | agentcore-documents-226484346947-development | ap-northeast-1 | ✅ ACTIVE |
+| S3 (Vectors) | agentcore-vectors-226484346947-development | ap-northeast-1 | ✅ ACTIVE |
+| KMS Key | agentcore-development-key | ap-northeast-1 | ✅ ACTIVE |
+| Cognito User Pool | agentic-rag-users-development | ap-northeast-1 | ✅ ACTIVE |
+| ECR Repository | agentic-rag-agent-development | ap-northeast-1 | ✅ ACTIVE |
+| ECR Repository | agentic-rag-agent-development | us-east-1 | ✅ ACTIVE |
+| IAM Role | agentcore-runtime-role-development | global | ✅ ACTIVE |
+| CodeBuild Project | agentic-rag-build-development | ap-northeast-1 | ✅ ACTIVE |
 
-### 2. AgenticRag-ECR-development
+### 2. AgentCore Components (us-east-1)
 
-| リソース | 値 |
-|---------|-----|
-| Repository URI | `226484346947.dkr.ecr.ap-northeast-1.amazonaws.com/agentic-rag-agent-development` |
-| Repository ARN | `arn:aws:ecr:ap-northeast-1:226484346947:repository/agentic-rag-agent-development` |
+| コンポーネント | ID/ARN | ステータス |
+|--------------|--------|----------|
+| **Memory Store** | agenticRagMemoryDevelopment-VIXDrsGejQ | ✅ ACTIVE |
+| **Agent Runtime** | agentcoreRuntimeDevelopment-XyDhtY5Hdx | ✅ READY |
+| **Runtime Endpoint** | agentcoreEndpointDevelopment | ✅ READY |
+| **Default Endpoint** | DEFAULT | ✅ READY |
 
-### 3. AgenticRag-AgentCore-development
+### 3. SSM Parameters
 
-| リソース | 値 |
-|---------|-----|
-| Runtime Role ARN | `arn:aws:iam::226484346947:role/agentcore-runtime-role-development` |
-| Config Parameter Path | `/agentcore/development/` |
-
----
-
-## ⚠️ CDK失敗 → CLI で解決
-
-### AgenticRag-Memory-development
-
-**CDK エラー**:
 ```
-CustomResource attribute error: Vendor response doesn't contain MemoryStoreId attribute
-```
-
-**原因**:
-- CDK Custom Resource の実装が API レスポンス形式と不一致
-- サービス自体は **正常に動作**
-
-**解決策**: boto3 で直接作成
-
-```python
-import boto3
-
-client = boto3.client('bedrock-agentcore-control', region_name='us-east-1')
-
-response = client.create_memory(
-    name='agenticRagMemoryDevelopment',
-    description='Memory store for Agentic RAG development environment',
-    eventExpiryDuration=30,  # 日数
-)
-# => Memory ID: agenticRagMemoryDevelopment-VIXDrsGejQ
-```
-
-**SSM パラメータ登録**:
-```bash
-aws ssm put-parameter \
-  --name "/agentcore/development/memory-store-id" \
-  --value "agenticRagMemoryDevelopment-VIXDrsGejQ" \
-  --type String \
-  --region ap-northeast-1
-```
-
-**結論**: CDK の Custom Resource に問題があるだけで、AgentCore Memory 自体は利用可能
-
----
-
-## 🔄 未デプロイのコンポーネント
-
-### 1. Amplify Gen2
-
-**状態**: 設定ファイルは存在するが未デプロイ
-
-**ファイル**:
-- `amplify/backend.ts` - バックエンド定義
-- `amplify/auth/resource.ts` - Cognito 認証設定
-
-**デプロイ方法**:
-```bash
-cd frontend
-npx ampx sandbox  # 開発環境
-# または
-npx ampx deploy   # 本番デプロイ
-```
-
-**依存関係**:
-- Lambda トリガー関数が未実装 (`functions/auth/*`)
-- これらを実装後にデプロイ必要
-
-### 2. Secrets Manager
-
-**状態**: CDK スタックに未実装
-
-**必要なシークレット**:
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (OAuth 用、オプション)
-- `SSO_CLIENT_ID` / `SSO_CLIENT_SECRET` (Enterprise SSO 用、オプション)
-- Bedrock API キー（不要 - IAM ロールで認証）
-
-**実装案**:
-```typescript
-// infrastructure/lib/secrets-stack.ts
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
-
-const apiSecret = new secretsmanager.Secret(this, 'ApiSecret', {
-  secretName: `/agentcore/${environment}/api-keys`,
-  generateSecretString: {
-    secretStringTemplate: JSON.stringify({ placeholder: true }),
-    generateStringKey: 'api-key',
-  },
-});
+/agentcore/development/
+├── agent-endpoint-arn    = arn:aws:bedrock-agentcore:us-east-1:226484346947:runtime/agentcoreRuntimeDevelopment-XyDhtY5Hdx/runtime-endpoint/agentcoreEndpointDevelopment
+├── agent-endpoint-id     = agentcoreEndpointDevelopment
+├── agent-runtime-id      = agentcoreRuntimeDevelopment-XyDhtY5Hdx
+├── bedrock-model-id      = us.amazon.nova-pro-v1:0
+├── ecr-repository-uri    = 226484346947.dkr.ecr.ap-northeast-1.amazonaws.com/agentic-rag-agent-development
+├── ecr-repository-uri-useast1 = 226484346947.dkr.ecr.us-east-1.amazonaws.com/agentic-rag-agent-development
+├── environment           = development
+└── memory-store-id       = agenticRagMemoryDevelopment-VIXDrsGejQ
 ```
 
 ---
 
-## 📋 次のステップ
+## ⏳ 未完了・オプション
 
-### 即時対応
-1. [ ] AWS 認証情報のローテーション（チャットに露出したため）
-2. [ ] Amplify Lambda トリガー関数の実装
-3. [ ] Amplify デプロイ
-
-### 中期対応
-1. [ ] AgentCore Memory GA 後に Memory Stack を有効化
-2. [ ] Secrets Manager Stack の追加（OAuth 使用時）
-3. [ ] CI/CD Pipeline の設定（GitHub Connection ARN 取得後）
-
-### 本番デプロイ前
-1. [ ] `ENVIRONMENT=prod` でのデプロイテスト
-2. [ ] WAF / CloudFront の追加
-3. [ ] バックアップ / DR 設定
+| コンポーネント | 理由 | 優先度 |
+|--------------|------|--------|
+| Gateway | roleArn, authorizerType が必要 | 低 (オプション) |
+| Knowledge Base (S3 Vector) | 追加設定が必要 | 中 |
+| Amplify Frontend | フロントエンドデプロイ待ち | 後続タスク |
 
 ---
 
-## 📝 ECR ライフサイクルルール修正
+## アーキテクチャ概要
 
-**問題**: `TagStatus.ANY` のルール優先度エラー
 ```
-UnscopedValidationError: TagStatus.Any rule must have highest priority, has 2 which is smaller than 3
-```
-
-**修正** (`infrastructure/lib/ecr-stack.ts`):
-```typescript
-// TagStatus.ANY は常に最大の優先度にする
-this.agentRepository.addLifecycleRule({
-  description: 'Keep limited number of images',
-  rulePriority: 100,  // 2 → 100 に変更
-  tagStatus: ecr.TagStatus.ANY,
-  maxImageCount: 10,
-});
+┌─────────────────────────────────────────────────────────────────────┐
+│                          AWS Cloud                                   │
+├─────────────────────────────────────────────────────────────────────┤
+│  ap-northeast-1                      │  us-east-1                    │
+│  ┌─────────────────────────────┐    │  ┌─────────────────────────┐ │
+│  │  ECR Repository             │────┼──│  ECR Repository          │ │
+│  │  (agentic-rag-agent-dev)    │    │  │  (agentic-rag-agent-dev) │ │
+│  └─────────────────────────────┘    │  └───────────┬─────────────┘ │
+│                                      │              │                │
+│  ┌─────────────────────────────┐    │  ┌───────────▼─────────────┐ │
+│  │  CodeBuild (ARM64)          │    │  │  AgentCore Runtime      │ │
+│  │  - Docker build & push      │────┼──│  (agentcoreRuntime...)  │ │
+│  └─────────────────────────────┘    │  └───────────┬─────────────┘ │
+│                                      │              │                │
+│  ┌─────────────────────────────┐    │  ┌───────────▼─────────────┐ │
+│  │  DynamoDB                   │    │  │  Runtime Endpoint       │ │
+│  │  - Events (Event Sourcing)  │    │  │  (agentcoreEndpoint...) │ │
+│  │  - ReadModels (CQRS)        │    │  └───────────┬─────────────┘ │
+│  └─────────────────────────────┘    │              │                │
+│                                      │  ┌───────────▼─────────────┐ │
+│  ┌─────────────────────────────┐    │  │  Memory Store           │ │
+│  │  S3 Buckets                 │    │  │  (agenticRagMemory...)  │ │
+│  │  - Documents                │    │  └─────────────────────────┘ │
+│  │  - Vectors (Knowledge Base) │    │                               │
+│  └─────────────────────────────┘    │                               │
+│                                      │                               │
+│  ┌─────────────────────────────┐    │                               │
+│  │  Cognito User Pool          │    │                               │
+│  │  - Authentication           │    │                               │
+│  └─────────────────────────────┘    │                               │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🔗 参考リンク
+## CI/CD パイプライン
 
-- [AWS Bedrock AgentCore Documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/agents.html)
-- [Amplify Gen2 Documentation](https://docs.amplify.aws/gen2/)
-- [CDK ECR Lifecycle Rules](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr.LifecycleRule.html)
+### ビルドプロセス
 
+1. **CodeBuild** (ARM64環境)
+   - Git clone from GitHub
+   - Docker build (uv + Python 3.11)
+   - Push to ECR (ap-northeast-1 & us-east-1)
+
+2. **デプロイスクリプト**
+   - `scripts/deploy-agentcore-full.py`
+   - Agent Runtime 作成
+   - Endpoint 作成
+   - SSM パラメータ更新
+
+### トリガー
+
+現在は手動実行。今後 CodePipeline による自動化を検討。
+
+---
+
+## 次のステップ
+
+1. **フロントエンド (Amplify/Next.js)**
+   - Cognito 認証統合
+   - AgentCore Endpoint への接続
+
+2. **Knowledge Base 設定**
+   - S3 Vector 設定
+   - OpenSearch Serverless (オプション)
+
+3. **Gateway 設定** (オプション)
+   - MCP プロトコル対応
+   - 認証設定
+
+4. **監視・ロギング**
+   - CloudWatch Logs 設定
+   - X-Ray トレーシング
+
+---
+
+## トラブルシューティングログ
+
+### 解決済み問題
+
+1. **pip dependency resolution error**
+   - 解決: Dockerfile で `uv` を使用するように変更
+
+2. **README.md not found**
+   - 解決: Dockerfile で `uv sync` 前に必要なファイルをコピー
+
+3. **ECR region mismatch**
+   - 解決: us-east-1 にも ECR リポジトリを作成し、両方にプッシュ
+
+4. **Architecture incompatible (arm64 required)**
+   - 解決: CodeBuild を ARM_CONTAINER に変更
+
+5. **IAM role trust policy**
+   - 解決: `bedrock-agentcore.amazonaws.com` を追加
+
+6. **ECR permissions for us-east-1**
+   - 解決: IAM インラインポリシーで両リージョンの ECR 権限を追加
