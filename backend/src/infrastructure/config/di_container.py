@@ -14,6 +14,7 @@ from src.infrastructure.agentcore.memory_config import MemoryConfig
 from src.infrastructure.agentcore.memory_client import AgentCoreMemoryClient
 from src.infrastructure.agentcore.episodic_memory import EpisodicMemoryService
 from src.infrastructure.agentcore.reflection_service import ReflectionService
+from src.infrastructure.external_services.s3vector import S3VectorClient
 
 logger = structlog.get_logger()
 
@@ -99,13 +100,30 @@ class DIContainer:
             config=self._memory_config,
         )
 
+    @cached_property
+    def s3vector_client(self) -> S3VectorClient:
+        """Get the S3Vector client for Knowledge Base operations.
+        
+        Returns:
+            Configured S3VectorClient instance
+        """
+        logger.info(
+            "initializing_s3vector_client",
+            knowledge_base_id=self._settings.knowledge_base_id,
+            region=self._settings.aws_region,
+        )
+        return S3VectorClient(
+            knowledge_base_id=self._settings.knowledge_base_id,
+            region_name=self._settings.aws_region,
+        )
+
     def reset(self) -> None:
         """Reset all cached instances.
         
         Useful for testing or when configuration changes.
         """
         # Clear cached properties
-        for attr in ["memory_client", "episodic_memory_service", "reflection_service"]:
+        for attr in ["memory_client", "episodic_memory_service", "reflection_service", "s3vector_client"]:
             if attr in self.__dict__:
                 del self.__dict__[attr]
         
