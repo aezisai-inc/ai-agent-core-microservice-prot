@@ -1,166 +1,166 @@
-# AgentCore Deployment Report
+# AgentCore + S3 Vectors デプロイメントレポート
 
-## デプロイ完了日時
-2025-12-07 16:00 JST (Knowledge Base追加)
+**デプロイ日時**: 2025-12-07
+**リージョン**: ap-northeast-1 (東京)
+**環境**: development
 
-## 環境
-- **Environment**: development
-- **AgentCore Region**: **ap-northeast-1 (東京)**
-- **Infrastructure Region**: ap-northeast-1
-- **Account ID**: 226484346947
+## ✅ デプロイ完了コンポーネント
 
----
+### 1. S3 Vectors (Knowledge Base ベクトルストア)
 
-## ✅ デプロイ済みリソース (すべて東京リージョン)
+| リソース | 値 |
+|---------|-----|
+| Vector Bucket | `agentcore-kb-vectors-development` |
+| Vector Bucket ARN | `arn:aws:s3vectors:ap-northeast-1:226484346947:bucket/agentcore-kb-vectors-development` |
+| Vector Index | `agentcore-kb-index` |
+| Vector Index ARN | `arn:aws:s3vectors:ap-northeast-1:226484346947:bucket/agentcore-kb-vectors-development/index/agentcore-kb-index` |
+| Dimension | 1024 (Titan Embed Text v2) |
+| Distance Metric | cosine |
 
-### 1. AgentCore Components
+**コスト**: OpenSearch Serverless の **1/10 以下** ($5-20/月 vs $700+/月)
 
-| コンポーネント | ID | ステータス |
-|--------------|-----|----------|
-| **Agent Runtime** | `agentcoreRuntimeDevelopment-D7hv2Z5zVV` | ✅ READY |
-| **Runtime Endpoint** | `agentcoreEndpointDevelopment` | ✅ READY |
-| **Memory Store** | `agenticRagMemoryTokyo-6b6TlgDbol` | ✅ ACTIVE |
-| **Knowledge Base** | `SWVG9LBC5K` | ✅ ACTIVE |
-| **S3 Data Source** | `NVVOAWSESK` | ✅ AVAILABLE |
-| **OpenSearch Collection** | `sj4efp9xypof1exox2ji` | ✅ ACTIVE |
+### 2. Bedrock Knowledge Base
 
-### 2. インフラストラクチャ (CDK)
+| リソース | 値 |
+|---------|-----|
+| Knowledge Base ID | `KCOEXQD1NV` |
+| Knowledge Base ARN | `arn:aws:bedrock:ap-northeast-1:226484346947:knowledge-base/KCOEXQD1NV` |
+| Status | `ACTIVE` |
+| Storage Type | S3_VECTORS |
+| Embedding Model | amazon.titan-embed-text-v2:0 |
 
-| リソース | 名前/ID | ステータス |
-|---------|---------|----------|
-| DynamoDB (Events) | agentic-rag-events-development | ✅ ACTIVE |
-| DynamoDB (ReadModels) | agentic-rag-read-models-development | ✅ ACTIVE |
-| S3 (Documents) | agentcore-documents-226484346947-development | ✅ ACTIVE |
-| S3 (Vectors) | agentcore-vectors-226484346947-development | ✅ ACTIVE |
-| KMS Key | agentcore-development-key | ✅ ACTIVE |
-| Cognito User Pool | agentic-rag-users-development | ✅ ACTIVE |
-| ECR Repository | agentic-rag-agent-development | ✅ ACTIVE |
-| IAM Role | agentcore-runtime-role-development | ✅ ACTIVE |
-| IAM Role | bedrock-knowledge-base-role-development | ✅ ACTIVE |
-| CodeBuild Project | agentic-rag-build-development (ARM64) | ✅ ACTIVE |
+### 3. Data Source
 
-### 3. SSM Parameters
+| リソース | 値 |
+|---------|-----|
+| Data Source ID | `R1BW5OB1WP` |
+| Source Bucket | `agentcore-documents-226484346947-development` |
+| Inclusion Prefix | `documents/` |
+| Chunking Strategy | FIXED_SIZE (512 tokens, 20% overlap) |
 
-```
-/agentcore/development/
-├── agent-runtime-id          = agentcoreRuntimeDevelopment-D7hv2Z5zVV
-├── agent-endpoint-id         = agentcoreEndpointDevelopment
-├── memory-store-id           = agenticRagMemoryTokyo-6b6TlgDbol
-├── knowledge-base-id         = SWVG9LBC5K
-├── data-source-id            = NVVOAWSESK
-├── opensearch-collection-arn = arn:aws:aoss:ap-northeast-1:226484346947:collection/sj4efp9xypof1exox2ji
-├── agentcore-region          = ap-northeast-1
-├── bedrock-model-id          = us.amazon.nova-pro-v1:0
-├── ecr-repository-uri        = 226484346947.dkr.ecr.ap-northeast-1.amazonaws.com/agentic-rag-agent-development
-└── environment               = development
-```
+### 4. AgentCore Runtime
 
----
+| リソース | 値 |
+|---------|-----|
+| Runtime Name | `agentcoreRuntimeDevelopment` |
+| Runtime ARN | (SSMパラメータ参照) |
+| Region | ap-northeast-1 |
+| ECR Repository | `agentic-rag-agent-development` |
 
-## アーキテクチャ (東京リージョン統合)
+### 5. AgentCore Memory
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    ap-northeast-1 (東京)                             │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌─────────────────────────────┐    ┌─────────────────────────────┐ │
-│  │  CodeBuild (ARM64)          │───▶│  ECR Repository             │ │
-│  │  Docker build & push        │    │  agentic-rag-agent-dev      │ │
-│  └─────────────────────────────┘    └───────────┬─────────────────┘ │
-│                                                  │                   │
-│                                     ┌────────────▼────────────────┐ │
-│                                     │  AgentCore Runtime          │ │
-│                                     │  agentcoreRuntimeDev...     │ │
-│                                     │  Status: READY              │ │
-│                                     └────────────┬────────────────┘ │
-│                                                  │                   │
-│  ┌─────────────────────────────┐    ┌────────────▼────────────────┐ │
-│  │  Memory Store               │    │  Runtime Endpoint           │ │
-│  │  agenticRagMemoryTokyo...   │◀──▶│  agentcoreEndpoint...       │ │
-│  │  Status: ACTIVE             │    │  Status: READY              │ │
-│  └─────────────────────────────┘    └─────────────────────────────┘ │
-│                                                  │                   │
-│  ┌─────────────────────────────┐                │                   │
-│  │  Knowledge Base (RAG)       │◀───────────────┘                   │
-│  │  ID: SWVG9LBC5K             │                                    │
-│  │  Status: ACTIVE             │                                    │
-│  └───────────┬─────────────────┘                                    │
-│              │                                                       │
-│  ┌───────────▼─────────────────┐    ┌─────────────────────────────┐ │
-│  │  OpenSearch Serverless      │    │  S3 Buckets                 │ │
-│  │  (Vector Store)             │◀───│  - Documents (Data Source)  │ │
-│  │  agentcore-kb-dev           │    │  - Vectors                  │ │
-│  └─────────────────────────────┘    └─────────────────────────────┘ │
-│                                                                      │
-│  ┌─────────────────────────────┐    ┌─────────────────────────────┐ │
-│  │  DynamoDB                   │    │  Cognito User Pool          │ │
-│  │  - Events (Event Sourcing)  │    │  Authentication             │ │
-│  │  - ReadModels (CQRS)        │    │                             │ │
-│  └─────────────────────────────┘    └─────────────────────────────┘ │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
-```
+| リソース | 値 |
+|---------|-----|
+| Memory Store ID | `mem_01jensb3j9e3q1hpws0b0gd15r` |
+| Strategies | Short-term, Episodic, Semantic |
 
----
+### 6. CDK管理リソース
 
-## RAG パイプライン
+| リソース | 値 |
+|---------|-----|
+| Events Table | `agentic-rag-events-development` |
+| Read Models Table | `agentic-rag-read-models-development` |
+| Documents Bucket | `agentcore-documents-226484346947-development` |
+| User Pool ID | (Cognito) |
+
+## SSM パラメータ一覧
 
 ```
-1. ドキュメントアップロード
-   S3 (Documents) → Data Source → Knowledge Base → OpenSearch (Vector Index)
-
-2. クエリ実行
-   User Query → Agent Runtime → Knowledge Base (Retrieve) → LLM (Generate) → Response
+/agentcore/development/knowledge-base-id: KCOEXQD1NV
+/agentcore/development/knowledge-base-arn: arn:aws:bedrock:ap-northeast-1:...
+/agentcore/development/data-source-id: R1BW5OB1WP
+/agentcore/development/vector-bucket: agentcore-kb-vectors-development
+/agentcore/development/agentcore-region: ap-northeast-1
+/agentcore/development/agent-endpoint-id-tokyo: agentcoreEndpointDevelopment
 ```
 
----
+## アーキテクチャ図
 
-## ⏳ 未完了・オプション
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                         ap-northeast-1                                │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│  ┌─────────────────┐     ┌─────────────────────────────────────────┐ │
+│  │  Amplify Gen2   │     │         AgentCore Runtime               │ │
+│  │  (Frontend)     │────▶│  - Strands Agents                       │ │
+│  │  + Cognito Auth │     │  - Clean Architecture                   │ │
+│  └─────────────────┘     │  - Streaming Response                   │ │
+│                          └──────────────────┬──────────────────────┘ │
+│                                             │                         │
+│           ┌─────────────────────────────────┼─────────────────────┐   │
+│           ▼                                 ▼                     ▼   │
+│  ┌─────────────────┐      ┌─────────────────────┐    ┌──────────────┐│
+│  │ AgentCore       │      │  Bedrock KB         │    │ AgentCore    ││
+│  │ Memory          │      │  + S3 Vectors       │    │ Observability││
+│  │                 │      │                     │    │              ││
+│  │ - Short-term    │      │  ID: KCOEXQD1NV     │    │ - CloudWatch ││
+│  │ - Episodic      │      │  Storage: S3_VECTORS│    │ - X-Ray      ││
+│  │ - Semantic      │      │  Cost: ~$10/月      │    │              ││
+│  └─────────────────┘      └─────────────────────┘    └──────────────┘│
+│                                    │                                  │
+│                                    ▼                                  │
+│                          ┌─────────────────────┐                      │
+│                          │  S3 Documents       │                      │
+│                          │  (Data Source)      │                      │
+│                          └─────────────────────┘                      │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+```
 
-| コンポーネント | 理由 | 優先度 |
-|--------------|------|--------|
-| Gateway | roleArn, authorizerType が必要 | 低 (オプション) |
-| Amplify Frontend | フロントエンドデプロイ待ち | 後続タスク |
+## コスト見積もり (月額)
 
----
+| コンポーネント | Before (OpenSearch) | After (S3 Vectors) |
+|--------------|--------------------|--------------------|
+| Vector Store | $700+ | **$5-20** |
+| AgentCore Runtime | - | $10-30 |
+| Memory Store | - | $5-10 |
+| Bedrock Inference | $50-100 | $50-100 |
+| **合計** | **$800+** | **$70-160** |
 
-## CI/CD パイプライン
-
-### ビルドプロセス
-
-1. **CodeBuild** (ARM64環境)
-   - Git clone from GitHub
-   - Docker build (uv + Python 3.11)
-   - Push to ECR (ap-northeast-1)
-
-2. **デプロイスクリプト**
-   - `scripts/deploy-agentcore-full.py` - AgentCore Runtime/Endpoint
-   - `scripts/create-knowledge-base.py` - Knowledge Base/OpenSearch
-
----
+**削減率: 80%以上**
 
 ## 次のステップ
 
-1. **フロントエンド (Amplify/Next.js)**
-   - Cognito 認証統合
-   - AgentCore Endpoint への接続
-   - RAG UI 実装
+1. ✅ ~~Knowledge Base (S3 Vectors) 作成~~
+2. ⬜ Documents バケットにサンプルドキュメントをアップロード
+3. ⬜ Knowledge Base インジェスト実行
+4. ⬜ Agent Runtime と Knowledge Base 連携テスト
+5. ⬜ Frontend RAG UI 実装
+6. ⬜ Amplify デプロイ
 
-2. **監視・ロギング**
-   - CloudWatch Logs 設定
-   - X-Ray トレーシング
+## ドキュメントアップロード & インジェスト方法
 
-3. **ドキュメント追加**
-   - S3 Documents バケットにファイルアップロード
-   - Knowledge Base インジェスト実行
+```bash
+# 1. ドキュメントをS3にアップロード
+aws s3 cp ./docs/ s3://agentcore-documents-226484346947-development/documents/ --recursive
 
----
+# 2. Knowledge Base インジェスト開始
+aws bedrock-agent start-ingestion-job \
+  --knowledge-base-id KCOEXQD1NV \
+  --data-source-id R1BW5OB1WP
+```
 
-## 変更履歴
+## 検索テスト方法
 
-| 日時 | 変更内容 |
-|-----|---------|
-| 2025-12-07 16:00 | Knowledge Base + OpenSearch Serverless 追加 |
-| 2025-12-07 15:45 | us-east-1 → ap-northeast-1 に移行 |
-| 2025-12-07 15:30 | 初回デプロイ (us-east-1) |
+```python
+import boto3
+
+client = boto3.client('bedrock-agent-runtime', region_name='ap-northeast-1')
+
+response = client.retrieve(
+    knowledgeBaseId='KCOEXQD1NV',
+    retrievalQuery={'text': 'テスト検索クエリ'},
+    retrievalConfiguration={
+        'vectorSearchConfiguration': {
+            'numberOfResults': 5
+        }
+    }
+)
+
+for result in response['retrievalResults']:
+    print(f"Score: {result['score']}")
+    print(f"Content: {result['content']['text'][:200]}...")
+    print()
+```
+
