@@ -6,9 +6,9 @@
  */
 
 import {
-  BedrockAgentRuntimeClient,
-  InvokeAgentCommand,
-} from "@aws-sdk/client-bedrock-agent-runtime";
+  BedrockAgentCoreClient,
+  InvokeAgentRuntimeCommand,
+} from "@aws-sdk/client-bedrock-agentcore";
 import { fromCognitoIdentityPool } from "@aws-sdk/credential-providers";
 import { fetchAuthSession } from "aws-amplify/auth";
 
@@ -87,17 +87,17 @@ export interface InvokeResponse {
  */
 export class AgentCoreClient {
   private config: AgentCoreConfig;
-  private client: BedrockAgentRuntimeClient | null = null;
+  private client: BedrockAgentCoreClient | null = null;
 
   constructor(config: AgentCoreConfig) {
     this.config = config;
   }
 
   /**
-   * Bedrock Agent Runtime クライアントを初期化
+   * Bedrock AgentCore クライアントを初期化
    * Cognito 認証情報を使用
    */
-  private async getClient(): Promise<BedrockAgentRuntimeClient> {
+  private async getClient(): Promise<BedrockAgentCoreClient> {
     if (this.client) {
       return this.client;
     }
@@ -107,51 +107,50 @@ export class AgentCoreClient {
       const session = await fetchAuthSession();
       const idToken = session.tokens?.idToken?.toString();
 
-      if (!idToken) {
-        throw new Error("Not authenticated. Please sign in first.");
+      if (idToken) {
+        // 認証済みユーザー用の認証情報
+        const credentials = fromCognitoIdentityPool({
+          clientConfig: { region: this.config.region },
+          identityPoolId: this.config.identityPoolId,
+          logins: {
+            [`cognito-idp.${this.config.region}.amazonaws.com/${this.config.userPoolId}`]: idToken,
+          },
+        });
+
+        this.client = new BedrockAgentCoreClient({
+          region: this.config.region,
+          credentials,
+        });
+      } else {
+        // 未認証ユーザー用の認証情報
+        const credentials = fromCognitoIdentityPool({
+          clientConfig: { region: this.config.region },
+          identityPoolId: this.config.identityPoolId,
+        });
+
+        this.client = new BedrockAgentCoreClient({
+          region: this.config.region,
+          credentials,
+        });
       }
 
-      // Cognito Identity Pool から AWS 認証情報を取得
+      return this.client;
+    } catch (error) {
+      console.error("Failed to initialize AgentCore client:", error);
+      
+      // フォールバック: 未認証クライアント
       const credentials = fromCognitoIdentityPool({
         clientConfig: { region: this.config.region },
         identityPoolId: this.config.identityPoolId,
-        logins: {
-          [`cognito-idp.${this.config.region}.amazonaws.com/${this.config.userPoolId}`]: idToken,
-        },
       });
 
-      this.client = new BedrockAgentRuntimeClient({
+      this.client = new BedrockAgentCoreClient({
         region: this.config.region,
         credentials,
       });
 
       return this.client;
-    } catch (error) {
-      console.error("Failed to initialize AgentCore client:", error);
-      throw error;
     }
-  }
-
-  /**
-   * 未認証でも呼び出し可能なクライアント（デモ用）
-   */
-  private async getUnauthenticatedClient(): Promise<BedrockAgentRuntimeClient> {
-    if (this.client) {
-      return this.client;
-    }
-
-    // 未認証ユーザー用の Identity Pool 認証情報
-    const credentials = fromCognitoIdentityPool({
-      clientConfig: { region: this.config.region },
-      identityPoolId: this.config.identityPoolId,
-    });
-
-    this.client = new BedrockAgentRuntimeClient({
-      region: this.config.region,
-      credentials,
-    });
-
-    return this.client;
   }
 
   /**
@@ -163,38 +162,26 @@ export class AgentCoreClient {
     const sources: RAGSource[] = [];
 
     try {
-      // 認証済みか未認証かでクライアントを選択
-      let client: BedrockAgentRuntimeClient;
-      try {
-        client = await this.getClient();
-      } catch {
-        // 認証されていない場合は未認証クライアントを使用
-        console.warn("Using unauthenticated client");
-        client = await this.getUnauthenticatedClient();
-      }
+      const client = await this.getClient();
 
-      const command = new InvokeAgentCommand({
-        agentId: this.config.agentRuntimeId,
-        agentAliasId: this.config.agentEndpointId,
-        sessionId: params.sessionId,
-        inputText: params.prompt,
-        enableTrace: false,
-        sessionState: {
-          sessionAttributes: {
-            userId: params.userId,
-            tenantId: params.tenantId || "",
-            ...Object.fromEntries(
-              Object.entries(params.context || {}).map(([k, v]) => [k, String(v)])
-            ),
-          },
+      const command = new InvokeAgentRuntimeCommand({
+        runtimeIdentifier: this.config.agentRuntimeId,
+        runtimeEndpointName: this.config.agentEndpointId,
+        payload: {
+          prompt: params.prompt,
+          sessionId: params.sessionId,
+          userId: params.userId,
+          tenantId: params.tenantId,
+          context: params.context,
         },
       });
 
       const response = await client.send(command);
 
       // ストリーミングレスポンスを処理
-      if (response.completion) {
-        for await (const event of response.completion) {
+      if (response.responseStream) {
+        for await (const event of response.responseStream) {
+          // テキストチャンク
           if (event.chunk?.bytes) {
             const text = new TextDecoder().decode(event.chunk.bytes);
             fullResponse += text;
@@ -204,20 +191,41 @@ export class AgentCoreClient {
             };
           }
 
-          // RAG ソースがある場合
-          if (event.trace?.trace?.orchestrationTrace?.observation?.knowledgeBaseLookupOutput) {
-            const kbOutput = event.trace.trace.orchestrationTrace.observation.knowledgeBaseLookupOutput;
-            if (kbOutput.retrievedReferences) {
-              for (const ref of kbOutput.retrievedReferences) {
-                sources.push({
-                  content: ref.content?.text || "",
-                  score: ref.metadata?.score as number || 0,
-                  source: ref.location?.s3Location?.uri || ref.metadata?.["x-amz-bedrock-kb-source-uri"] as string || "Unknown",
-                });
+          // JSON形式のイベント
+          if (event.chunk?.bytes) {
+            try {
+              const text = new TextDecoder().decode(event.chunk.bytes);
+              const data = JSON.parse(text);
+              
+              if (data.type === 'text' && data.content) {
+                fullResponse += data.content;
+                yield { type: 'text', content: data.content };
+              } else if (data.type === 'sources' && data.sources) {
+                sources.push(...data.sources);
+                yield { type: 'sources', sources: data.sources };
+              } else if (data.type === 'tool_use') {
+                yield { 
+                  type: 'tool_use', 
+                  toolName: data.name, 
+                  toolInput: data.input 
+                };
+              } else if (data.type === 'tool_result') {
+                yield { type: 'tool_result', toolResult: data.result };
               }
+            } catch {
+              // JSONじゃない場合はテキストとして扱う（既に処理済み）
             }
           }
         }
+      }
+
+      // 非ストリーミングレスポンス
+      if (response.output) {
+        const outputText = typeof response.output === 'string' 
+          ? response.output 
+          : JSON.stringify(response.output);
+        fullResponse = outputText;
+        yield { type: "text", content: outputText };
       }
 
       // ソースがあれば送信
@@ -232,7 +240,7 @@ export class AgentCoreClient {
       yield {
         type: "end",
         latencyMs: Date.now() - startTime,
-        tokensUsed: 0, // AgentCore doesn't return token count directly
+        tokensUsed: 0,
       };
 
     } catch (error) {

@@ -17,11 +17,11 @@ global.TextDecoder = require('util').TextDecoder;
 
 // Mock AWS SDK
 const mockSend = jest.fn();
-jest.mock('@aws-sdk/client-bedrock-agent-runtime', () => ({
-  BedrockAgentRuntimeClient: jest.fn().mockImplementation(() => ({
+jest.mock('@aws-sdk/client-bedrock-agentcore', () => ({
+  BedrockAgentCoreClient: jest.fn().mockImplementation(() => ({
     send: mockSend,
   })),
-  InvokeAgentCommand: jest.fn(),
+  InvokeAgentRuntimeCommand: jest.fn(),
 }));
 
 jest.mock('@aws-sdk/credential-providers', () => ({
@@ -60,9 +60,9 @@ describe('AgentCoreClient', () => {
   });
 
   describe('stream', () => {
-    it('should yield text chunks from completion', async () => {
-      // Mock async iterable completion
-      const mockCompletion = {
+    it('should yield text chunks from responseStream', async () => {
+      // Mock async iterable responseStream
+      const mockResponseStream = {
         [Symbol.asyncIterator]: async function* () {
           yield {
             chunk: {
@@ -78,7 +78,7 @@ describe('AgentCoreClient', () => {
       };
 
       mockSend.mockResolvedValue({
-        completion: mockCompletion,
+        responseStream: mockResponseStream,
       });
 
       const client = new AgentCoreClient(defaultConfig);
@@ -118,7 +118,7 @@ describe('AgentCoreClient', () => {
     });
 
     it('should yield end chunk when stream completes', async () => {
-      const mockCompletion = {
+      const mockResponseStream = {
         [Symbol.asyncIterator]: async function* () {
           yield {
             chunk: {
@@ -129,7 +129,7 @@ describe('AgentCoreClient', () => {
       };
 
       mockSend.mockResolvedValue({
-        completion: mockCompletion,
+        responseStream: mockResponseStream,
       });
 
       const client = new AgentCoreClient(defaultConfig);
@@ -152,7 +152,7 @@ describe('AgentCoreClient', () => {
 
   describe('invoke', () => {
     it('should return aggregated response', async () => {
-      const mockCompletion = {
+      const mockResponseStream = {
         [Symbol.asyncIterator]: async function* () {
           yield {
             chunk: {
@@ -163,7 +163,7 @@ describe('AgentCoreClient', () => {
       };
 
       mockSend.mockResolvedValue({
-        completion: mockCompletion,
+        responseStream: mockResponseStream,
       });
 
       const client = new AgentCoreClient(defaultConfig);
