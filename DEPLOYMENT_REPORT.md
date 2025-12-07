@@ -120,14 +120,47 @@
 
 **削減率: 80%以上**
 
+## ✅ RAG パイプライン動作確認済み
+
+### テスト結果
+```
+Query: パスワードを忘れた場合
+→ Score: 0.7291 | Source: faq.md ✅
+
+Query: 料金プランについて  
+→ Score: 0.6002 | Source: product-guide.md ✅
+
+Query: APIの認証方法は？
+→ Score: 0.7170 | Source: api-reference.md ✅
+```
+
+### S3 Vectors 設定上の注意点
+
+S3 Vectors には **filterable metadata の 2048 byte 制限** があります。
+Bedrock Knowledge Base と連携する場合、以下のメタデータキーを
+`nonFilterableMetadataKeys` に設定する必要があります:
+
+```python
+metadataConfiguration={
+    'nonFilterableMetadataKeys': [
+        'AMAZON_BEDROCK_TEXT_CHUNK',
+        'AMAZON_BEDROCK_METADATA',
+        'x-amz-bedrock-kb-source-uri',
+        'x-amz-bedrock-kb-data-source-id',
+        'x-amz-bedrock-kb-chunk-id',
+    ]
+}
+```
+
 ## 次のステップ
 
 1. ✅ ~~Knowledge Base (S3 Vectors) 作成~~
-2. ⬜ Documents バケットにサンプルドキュメントをアップロード
-3. ⬜ Knowledge Base インジェスト実行
-4. ⬜ Agent Runtime と Knowledge Base 連携テスト
-5. ⬜ Frontend RAG UI 実装
-6. ⬜ Amplify デプロイ
+2. ✅ ~~Documents バケットにサンプルドキュメントをアップロード~~
+3. ✅ ~~Knowledge Base インジェスト実行~~
+4. ✅ ~~Agent Runtime と Knowledge Base 連携~~
+5. ✅ ~~RAG 検索テスト~~
+6. ⬜ Frontend RAG UI 実装
+7. ⬜ Amplify デプロイ
 
 ## ドキュメントアップロード & インジェスト方法
 
