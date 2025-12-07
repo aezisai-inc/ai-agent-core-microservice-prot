@@ -23,7 +23,6 @@ export {
 export {
   useChatStream,
   type ChatMessage,
-  type StreamMode,
   type UseChatStreamOptions,
   type UseChatStreamReturn,
 } from "./hooks/use-chat-stream";
