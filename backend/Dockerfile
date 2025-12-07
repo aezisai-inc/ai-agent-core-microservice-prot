@@ -12,19 +12,22 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies and uv
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Add uv to PATH
+ENV PATH="/root/.local/bin:$PATH"
 
 # Copy dependency files first (for better layer caching)
-COPY requirements.txt .
 COPY pyproject.toml .
+COPY uv.lock .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies using uv (much faster than pip)
+RUN uv sync --no-dev --frozen
 
 # Copy application code
 COPY src/ ./src/
@@ -38,8 +41,8 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
 
 # AgentCore Runtime entrypoint
-# The agentcore CLI will use this as the entry point
-CMD ["python", "agent.py"]
+# Use uv run to execute with the correct virtual environment
+CMD ["uv", "run", "python", "agent.py"]
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
