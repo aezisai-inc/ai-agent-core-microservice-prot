@@ -12,8 +12,10 @@
  * 環境変数の型定義
  */
 interface EnvironmentConfig {
-  /** AgentCore Runtime エンドポイント URL */
-  agentCoreEndpoint: string;
+  /** AgentCore Runtime ID */
+  agentRuntimeId: string;
+  /** AgentCore Endpoint ID */
+  agentEndpointId: string;
   /** Cognito User Pool ID */
   cognitoUserPoolId: string;
   /** Cognito Client ID */
@@ -55,9 +57,13 @@ function validateEnvVar(name: string, value: string | undefined): string {
  */
 export function getConfig(): EnvironmentConfig {
   return {
-    agentCoreEndpoint: validateEnvVar(
-      'NEXT_PUBLIC_AGENTCORE_ENDPOINT',
-      process.env.NEXT_PUBLIC_AGENTCORE_ENDPOINT
+    agentRuntimeId: validateEnvVar(
+      'NEXT_PUBLIC_AGENT_RUNTIME_ID',
+      process.env.NEXT_PUBLIC_AGENT_RUNTIME_ID
+    ),
+    agentEndpointId: validateEnvVar(
+      'NEXT_PUBLIC_AGENT_ENDPOINT_ID',
+      process.env.NEXT_PUBLIC_AGENT_ENDPOINT_ID
     ),
     cognitoUserPoolId: validateEnvVar(
       'NEXT_PUBLIC_COGNITO_USER_POOL_ID',
@@ -82,9 +88,11 @@ export function getConfig(): EnvironmentConfig {
 export function getAgentCoreConfig() {
   const config = getConfig();
   return {
-    endpoint: config.agentCoreEndpoint,
-    timeout: 30000,
-    maxRetries: 3,
+    region: config.awsRegion,
+    agentRuntimeId: config.agentRuntimeId,
+    agentEndpointId: config.agentEndpointId,
+    identityPoolId: config.cognitoIdentityPoolId,
+    userPoolId: config.cognitoUserPoolId,
   };
 }
 
@@ -108,7 +116,8 @@ export function isConfigValid(): boolean {
   try {
     const config = getConfig();
     return (
-      !config.agentCoreEndpoint.startsWith('PLACEHOLDER_') &&
+      !config.agentRuntimeId.startsWith('PLACEHOLDER_') &&
+      !config.agentEndpointId.startsWith('PLACEHOLDER_') &&
       !config.cognitoUserPoolId.startsWith('PLACEHOLDER_') &&
       !config.cognitoClientId.startsWith('PLACEHOLDER_')
     );
