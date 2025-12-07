@@ -20,6 +20,7 @@
     "aws-cdk": "^2.170.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.2.0",
+    "ts-node": "^10.9.2",
     "typescript": "~5.6.0"
   },
   "dependencies": {
@@ -27,4 +28,3 @@
     "constructs": "^10.4.0"
   }
 }
-
