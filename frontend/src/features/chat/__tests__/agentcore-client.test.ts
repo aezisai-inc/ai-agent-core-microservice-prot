@@ -11,9 +11,13 @@ import {
   getAgentCoreClient,
 } from '../api/agentcore-client';
 
-// TextEncoder polyfill for Jest
+// Polyfills for Jest (Node.js environment)
 global.TextEncoder = require('util').TextEncoder;
 global.TextDecoder = require('util').TextDecoder;
+
+// ReadableStream polyfill for Node.js
+const { ReadableStream: NodeReadableStream } = require('stream/web');
+global.ReadableStream = NodeReadableStream;
 
 // Mock AWS SDK
 const mockSend = jest.fn();
@@ -38,6 +42,27 @@ jest.mock('aws-amplify/auth', () => ({
   }),
 }));
 
+// Helper to create mock SdkStream with transformToWebStream
+function createMockSdkStream(chunks: string[]) {
+  return {
+    transformToWebStream: () => {
+      let index = 0;
+      return new ReadableStream({
+        pull(controller) {
+          if (index < chunks.length) {
+            controller.enqueue(new TextEncoder().encode(chunks[index]));
+            index++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+    },
+    transformToString: async () => chunks.join(''),
+    transformToByteArray: async () => new TextEncoder().encode(chunks.join('')),
+  };
+}
+
 describe('AgentCoreClient', () => {
   const defaultConfig = {
     region: 'ap-northeast-1',
@@ -60,14 +85,8 @@ describe('AgentCoreClient', () => {
   });
 
   describe('stream', () => {
-    it('should yield text chunks from response', async () => {
-      // Mock async iterable response that yields Uint8Array chunks
-      const mockResponse = {
-        [Symbol.asyncIterator]: async function* () {
-          yield new TextEncoder().encode('Hello ');
-          yield new TextEncoder().encode('World');
-        },
-      };
+    it('should yield text chunks from response stream', async () => {
+      const mockResponse = createMockSdkStream(['Hello ', 'World']);
 
       mockSend.mockResolvedValue({
         response: mockResponse,
@@ -110,11 +129,7 @@ describe('AgentCoreClient', () => {
     });
 
     it('should yield end chunk when stream completes', async () => {
-      const mockResponse = {
-        [Symbol.asyncIterator]: async function* () {
-          yield new TextEncoder().encode('Done');
-        },
-      };
+      const mockResponse = createMockSdkStream(['Done']);
 
       mockSend.mockResolvedValue({
         response: mockResponse,
@@ -136,15 +151,37 @@ describe('AgentCoreClient', () => {
       expect(endChunk).not.toBeNull();
       expect(endChunk?.latencyMs).toBeDefined();
     });
+
+    it('should handle JSON formatted chunks', async () => {
+      const mockResponse = createMockSdkStream([
+        '{"type":"text","content":"Hello"}\n',
+        '{"type":"text","content":" World"}\n',
+      ]);
+
+      mockSend.mockResolvedValue({
+        response: mockResponse,
+      });
+
+      const client = new AgentCoreClient(defaultConfig);
+      const chunks: string[] = [];
+      
+      for await (const chunk of client.stream({
+        sessionId: 'test-session',
+        userId: 'test-user',
+        prompt: 'Hello',
+      })) {
+        if (chunk.type === 'text' && chunk.content) {
+          chunks.push(chunk.content);
+        }
+      }
+
+      expect(chunks.join('')).toBe('Hello World');
+    });
   });
 
   describe('invoke', () => {
     it('should return aggregated response', async () => {
-      const mockResponse = {
-        [Symbol.asyncIterator]: async function* () {
-          yield new TextEncoder().encode('Complete response');
-        },
-      };
+      const mockResponse = createMockSdkStream(['Complete response']);
 
       mockSend.mockResolvedValue({
         response: mockResponse,
