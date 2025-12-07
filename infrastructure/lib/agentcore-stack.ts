@@ -44,6 +44,7 @@ export class AgentCoreStack extends cdk.Stack {
       roleName: `agentcore-runtime-role-${environment}`,
       assumedBy: new iam.CompositePrincipal(
         new iam.ServicePrincipal('bedrock.amazonaws.com'),
+        new iam.ServicePrincipal('bedrock-agentcore.amazonaws.com'),
         new iam.ServicePrincipal('lambda.amazonaws.com'),
       ),
       description: 'IAM role for AgentCore Runtime execution',
