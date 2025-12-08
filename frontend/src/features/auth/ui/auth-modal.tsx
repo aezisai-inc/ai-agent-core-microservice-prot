@@ -7,19 +7,21 @@ import { useAuth } from "@/features/chat/hooks/use-auth";
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSuccess?: () => void;
 }
 
 type AuthMode = "signin" | "signup";
 
-export function AuthModal({ isOpen, onClose }: AuthModalProps) {
+export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const [mode, setMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmCode, setConfirmCode] = useState("");
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [loginSuccess, setLoginSuccess] = useState(false);
 
-  const { login, register, confirmRegistration, isLoading, error } = useAuth();
+  const { login, register, confirmRegistration, isLoading, error, isAuthenticated } = useAuth();
 
   if (!isOpen) return null;
 
@@ -33,15 +35,26 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
         setNeedsConfirmation(false);
         // 確認後に自動でサインイン
         await login(email, password);
-        onClose();
+        setLoginSuccess(true);
+        // 状態が伝播するのを待ってから閉じる
+        setTimeout(() => {
+          onSuccess?.();
+          onClose();
+        }, 500);
       } else if (mode === "signin") {
         await login(email, password);
-        onClose();
+        setLoginSuccess(true);
+        // 状態が伝播するのを待ってから閉じる
+        setTimeout(() => {
+          onSuccess?.();
+          onClose();
+        }, 500);
       } else {
         await register(email, password);
         setNeedsConfirmation(true);
       }
     } catch (err) {
+      setLoginSuccess(false);
       setLocalError(err instanceof Error ? err.message : "エラーが発生しました");
     }
   };

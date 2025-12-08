@@ -39,7 +39,13 @@ export function ChatContainer({ agentId, className }: ChatContainerProps) {
   const [showAuthModal, setShowAuthModal] = useState(false);
   
   // 認証状態
-  const { user, isAuthenticated, isLoading: authLoading, getIdToken, logout } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading, getIdToken, logout, refreshAuth } = useAuth();
+  
+  // 認証成功時のハンドラ
+  const handleAuthSuccess = useCallback(() => {
+    console.log('[ChatContainer] Auth success, refreshing...');
+    refreshAuth();
+  }, [refreshAuth]);
 
   // 設定チェックとIDトークン取得
   useEffect(() => {
@@ -152,7 +158,8 @@ export function ChatContainer({ agentId, className }: ChatContainerProps) {
       {/* 認証モーダル */}
       <AuthModal 
         isOpen={showAuthModal} 
-        onClose={() => setShowAuthModal(false)} 
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={handleAuthSuccess}
       />
 
       {/* 認証ステータスバー */}

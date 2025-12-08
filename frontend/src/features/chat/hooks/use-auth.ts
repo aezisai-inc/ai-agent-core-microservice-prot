@@ -71,25 +71,34 @@ export function useAuth(): UseAuthReturn {
   const fetchUser = useCallback(async (): Promise<User | null> => {
     // Amplify が設定されていない場合はスキップ
     if (!isConfigValid()) {
+      console.log('[useAuth] Config not valid, skipping fetchUser');
       return null;
     }
 
     try {
+      console.log('[useAuth] Fetching current user...');
       const currentUser = await getCurrentUser();
+      console.log('[useAuth] Current user:', currentUser);
+      
       const session = await fetchAuthSession();
+      console.log('[useAuth] Session obtained:', !!session.tokens);
       
       // ID トークンからカスタムクレームを取得
       const idToken = session.tokens?.idToken;
       const claims = idToken?.payload;
 
-      return {
+      const user: User = {
         userId: currentUser.userId,
         username: currentUser.username,
         email: claims?.email as string | undefined,
         tenantId: claims?.['custom:tenant_id'] as string | undefined,
         groups: claims?.['cognito:groups'] as string[] | undefined,
       };
-    } catch {
+      
+      console.log('[useAuth] User fetched successfully:', user.userId);
+      return user;
+    } catch (error) {
+      console.log('[useAuth] Error fetching user:', error);
       return null;
     }
   }, []);
@@ -98,8 +107,11 @@ export function useAuth(): UseAuthReturn {
    * 認証状態を更新
    */
   const refreshAuth = useCallback(async () => {
+    console.log('[useAuth] Refreshing auth state...');
+    
     // Amplify が設定されていない場合は未認証として扱う
     if (!isConfigValid()) {
+      console.log('[useAuth] Config not valid, setting unauthenticated');
       setState({
         user: null,
         isAuthenticated: false,
@@ -113,6 +125,7 @@ export function useAuth(): UseAuthReturn {
     
     try {
       const user = await fetchUser();
+      console.log('[useAuth] Setting auth state, user:', !!user);
       setState({
         user,
         isAuthenticated: !!user,
@@ -120,6 +133,7 @@ export function useAuth(): UseAuthReturn {
         error: null,
       });
     } catch (error) {
+      console.error('[useAuth] Error refreshing auth:', error);
       setState({
         user: null,
         isAuthenticated: false,
@@ -134,10 +148,12 @@ export function useAuth(): UseAuthReturn {
     if (initialized.current) return;
     initialized.current = true;
     
+    console.log('[useAuth] Initial auth check...');
+    
     // 少し遅延して Amplify 初期化を待つ
     const timer = setTimeout(() => {
       refreshAuth();
-    }, 100);
+    }, 200);
     
     return () => clearTimeout(timer);
   }, [refreshAuth]);
@@ -146,6 +162,8 @@ export function useAuth(): UseAuthReturn {
    * サインイン
    */
   const login = useCallback(async (email: string, password: string) => {
+    console.log('[useAuth] Attempting login for:', email);
+    
     if (!isConfigValid()) {
       throw new Error('Amplify is not configured');
     }
@@ -158,12 +176,28 @@ export function useAuth(): UseAuthReturn {
         password,
       };
 
+      console.log('[useAuth] Calling signIn...');
       const result = await signIn(input);
+      console.log('[useAuth] SignIn result:', result);
 
       if (result.isSignedIn) {
-        await refreshAuth();
+        console.log('[useAuth] Sign in successful, fetching user...');
+        
+        // 少し待ってからユーザー情報を取得
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        const user = await fetchUser();
+        console.log('[useAuth] User after login:', user);
+        
+        setState({
+          user,
+          isAuthenticated: !!user,
+          isLoading: false,
+          error: null,
+        });
       } else {
         // MFA などの追加ステップが必要な場合
+        console.log('[useAuth] Additional step required:', result.nextStep);
         setState((prev) => ({
           ...prev,
           isLoading: false,
@@ -171,6 +205,7 @@ export function useAuth(): UseAuthReturn {
         }));
       }
     } catch (error) {
+      console.error('[useAuth] Login error:', error);
       setState((prev) => ({
         ...prev,
         isLoading: false,
@@ -178,12 +213,14 @@ export function useAuth(): UseAuthReturn {
       }));
       throw error;
     }
-  }, [refreshAuth]);
+  }, [fetchUser]);
 
   /**
    * サインアウト
    */
   const logout = useCallback(async () => {
+    console.log('[useAuth] Logging out...');
+    
     if (!isConfigValid()) {
       throw new Error('Amplify is not configured');
     }
@@ -192,6 +229,7 @@ export function useAuth(): UseAuthReturn {
 
     try {
       await signOut();
+      console.log('[useAuth] Signed out successfully');
       setState({
         user: null,
         isAuthenticated: false,
@@ -199,6 +237,7 @@ export function useAuth(): UseAuthReturn {
         error: null,
       });
     } catch (error) {
+      console.error('[useAuth] Logout error:', error);
       setState((prev) => ({
         ...prev,
         isLoading: false,
@@ -212,6 +251,8 @@ export function useAuth(): UseAuthReturn {
    * サインアップ
    */
   const register = useCallback(async (email: string, password: string) => {
+    console.log('[useAuth] Registering:', email);
+    
     if (!isConfigValid()) {
       throw new Error('Amplify is not configured');
     }
@@ -230,8 +271,10 @@ export function useAuth(): UseAuthReturn {
       };
 
       await signUp(input);
+      console.log('[useAuth] Registration successful');
       setState((prev) => ({ ...prev, isLoading: false }));
     } catch (error) {
+      console.error('[useAuth] Registration error:', error);
       setState((prev) => ({
         ...prev,
         isLoading: false,
@@ -245,6 +288,8 @@ export function useAuth(): UseAuthReturn {
    * サインアップ確認
    */
   const confirmRegistration = useCallback(async (email: string, code: string) => {
+    console.log('[useAuth] Confirming registration:', email);
+    
     if (!isConfigValid()) {
       throw new Error('Amplify is not configured');
     }
@@ -256,8 +301,10 @@ export function useAuth(): UseAuthReturn {
         username: email,
         confirmationCode: code,
       });
+      console.log('[useAuth] Registration confirmed');
       setState((prev) => ({ ...prev, isLoading: false }));
     } catch (error) {
+      console.error('[useAuth] Confirmation error:', error);
       setState((prev) => ({
         ...prev,
         isLoading: false,
@@ -278,7 +325,8 @@ export function useAuth(): UseAuthReturn {
     try {
       const session = await fetchAuthSession();
       return session.tokens?.accessToken?.toString() ?? null;
-    } catch {
+    } catch (error) {
+      console.error('[useAuth] Error getting access token:', error);
       return null;
     }
   }, []);
@@ -294,7 +342,8 @@ export function useAuth(): UseAuthReturn {
     try {
       const session = await fetchAuthSession();
       return session.tokens?.idToken?.toString() ?? null;
-    } catch {
+    } catch (error) {
+      console.error('[useAuth] Error getting ID token:', error);
       return null;
     }
   }, []);
