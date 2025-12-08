@@ -6,7 +6,7 @@ import { MessageList } from "@/shared/ui/organisms/message-list";
 import { ChatInput } from "@/shared/ui/molecules/chat-input";
 import { useChatStream, ChatMessage } from "../hooks/use-chat-stream";
 import { useAuth } from "../hooks/use-auth";
-import { getAgentCoreConfig, isConfigValid } from "@/shared/lib/config";
+import { getAgentCoreConfig, isAuthConfigValid, isAgentCoreConfigValid } from "@/shared/lib/config";
 import { AuthModal } from "@/features/auth";
 
 // cn utility function
@@ -43,10 +43,17 @@ export function ChatContainer({ agentId, className }: ChatContainerProps) {
 
   // 設定チェックとIDトークン取得
   useEffect(() => {
-    if (!isConfigValid()) {
+    // 認証設定が無効な場合のエラー
+    if (!isAuthConfigValid()) {
       setConfigError(
-        'アプリケーションの設定が完了していません。管理者にお問い合わせください。'
+        '認証の設定が完了していません。Cognito の環境変数を確認してください。'
       );
+      return;
+    }
+    
+    // AgentCore 設定が無効な場合の警告（認証は可能）
+    if (!isAgentCoreConfigValid()) {
+      console.warn('[ChatContainer] AgentCore configuration not valid. Chat may not work.');
     }
     
     // IDトークンを取得

@@ -65,3 +65,4 @@ logs/
 .next/
 out/
 
+frontend/tsconfig.tsbuildinfo
