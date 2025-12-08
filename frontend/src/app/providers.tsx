@@ -3,7 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Amplify } from "aws-amplify";
-import { getCognitoConfig, isConfigValid } from "@/shared/lib/config";
+import { getCognitoConfig, isAuthConfigValid } from "@/shared/lib/config";
 
 /**
  * Amplify 初期化 (モジュールロード時に即座に実行)
@@ -18,9 +18,10 @@ function initializeAmplify() {
   if (amplifyInitialized) return;
   if (typeof window === 'undefined') return; // SSR ではスキップ
   
-  // 設定が有効な場合のみ初期化
-  if (!isConfigValid()) {
-    console.warn('[Amplify] Configuration not valid. Skipping initialization.');
+  // 認証設定が有効な場合のみ初期化
+  if (!isAuthConfigValid()) {
+    console.warn('[Amplify] Auth configuration not valid. Skipping initialization.');
+    console.warn('[Amplify] Check NEXT_PUBLIC_COGNITO_USER_POOL_ID and NEXT_PUBLIC_COGNITO_CLIENT_ID');
     return;
   }
 

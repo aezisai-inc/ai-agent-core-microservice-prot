@@ -8,6 +8,8 @@ export {
   getAgentCoreConfig,
   getCognitoConfig,
   isConfigValid,
+  isAuthConfigValid,
+  isAgentCoreConfigValid,
 } from './config';
 export {
   cn,

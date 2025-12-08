@@ -16,7 +16,7 @@ import {
   SignInInput,
   SignUpInput,
 } from 'aws-amplify/auth';
-import { isConfigValid } from '@/shared/lib/config';
+import { isAuthConfigValid } from '@/shared/lib/config';
 
 export interface User {
   userId: string;
@@ -69,8 +69,8 @@ export function useAuth(): UseAuthReturn {
    * 現在のユーザー情報を取得
    */
   const fetchUser = useCallback(async (): Promise<User | null> => {
-    // Amplify が設定されていない場合はスキップ
-    if (!isConfigValid()) {
+    // Amplify 認証が設定されていない場合はスキップ
+    if (!isAuthConfigValid()) {
       return null;
     }
 
@@ -98,8 +98,8 @@ export function useAuth(): UseAuthReturn {
    * 認証状態を更新
    */
   const refreshAuth = useCallback(async () => {
-    // Amplify が設定されていない場合は未認証として扱う
-    if (!isConfigValid()) {
+    // Amplify 認証が設定されていない場合は未認証として扱う
+    if (!isAuthConfigValid()) {
       setState({
         user: null,
         isAuthenticated: false,
@@ -146,8 +146,8 @@ export function useAuth(): UseAuthReturn {
    * サインイン
    */
   const login = useCallback(async (email: string, password: string) => {
-    if (!isConfigValid()) {
-      throw new Error('Amplify is not configured');
+    if (!isAuthConfigValid()) {
+      throw new Error('Amplify Auth is not configured');
     }
 
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
@@ -184,8 +184,8 @@ export function useAuth(): UseAuthReturn {
    * サインアウト
    */
   const logout = useCallback(async () => {
-    if (!isConfigValid()) {
-      throw new Error('Amplify is not configured');
+    if (!isAuthConfigValid()) {
+      throw new Error('Amplify Auth is not configured');
     }
 
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
@@ -212,8 +212,8 @@ export function useAuth(): UseAuthReturn {
    * サインアップ
    */
   const register = useCallback(async (email: string, password: string) => {
-    if (!isConfigValid()) {
-      throw new Error('Amplify is not configured');
+    if (!isAuthConfigValid()) {
+      throw new Error('Amplify Auth is not configured');
     }
 
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
@@ -245,8 +245,8 @@ export function useAuth(): UseAuthReturn {
    * サインアップ確認
    */
   const confirmRegistration = useCallback(async (email: string, code: string) => {
-    if (!isConfigValid()) {
-      throw new Error('Amplify is not configured');
+    if (!isAuthConfigValid()) {
+      throw new Error('Amplify Auth is not configured');
     }
 
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
@@ -271,7 +271,7 @@ export function useAuth(): UseAuthReturn {
    * アクセストークン取得
    */
   const getAccessToken = useCallback(async (): Promise<string | null> => {
-    if (!isConfigValid()) {
+    if (!isAuthConfigValid()) {
       return null;
     }
 
@@ -287,7 +287,7 @@ export function useAuth(): UseAuthReturn {
    * ID トークン取得
    */
   const getIdToken = useCallback(async (): Promise<string | null> => {
-    if (!isConfigValid()) {
+    if (!isAuthConfigValid()) {
       return null;
     }
 
