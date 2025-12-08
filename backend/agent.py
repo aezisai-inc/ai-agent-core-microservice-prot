@@ -18,54 +18,18 @@ Usage:
     agentcore invoke '{"prompt": "Hello"}'
 """
 
-import asyncio
 import json
 from typing import Any, AsyncIterator
 
 import structlog
 
-# Note: In production, import from bedrock_agentcore
-# from bedrock_agentcore import BedrockAgentCoreApp
+# AgentCore SDK
+from bedrock_agentcore import BedrockAgentCoreApp
 
 from src.infrastructure.config import get_container
 from src.presentation.entrypoint.agent_factory import create_agent, AgentConfig
 
 logger = structlog.get_logger()
-
-
-# ============================================================================
-# AgentCore App Simulation (for development)
-# In production, use: from bedrock_agentcore import BedrockAgentCoreApp
-# ============================================================================
-
-class BedrockAgentCoreApp:
-    """Simulated BedrockAgentCoreApp for development.
-    
-    In production, this would be imported from bedrock_agentcore SDK.
-    This class provides the interface for registering entrypoints
-    and handling AgentCore Runtime invocations.
-    """
-    
-    def __init__(self):
-        self._entrypoint = None
-    
-    def entrypoint(self, func):
-        """Decorator to register the main entrypoint function."""
-        self._entrypoint = func
-        return func
-    
-    def run(self):
-        """Start the agent runtime."""
-        logger.info("agentcore_runtime_started")
-        # In production, this would start the AgentCore Runtime server
-    
-    async def invoke(self, payload: dict[str, Any]) -> AsyncIterator[str]:
-        """Invoke the registered entrypoint."""
-        if self._entrypoint is None:
-            raise RuntimeError("No entrypoint registered")
-        
-        async for chunk in self._entrypoint(payload):
-            yield chunk
 
 
 # ============================================================================
