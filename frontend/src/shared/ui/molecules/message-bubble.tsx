@@ -73,28 +73,83 @@ export function MessageBubble({
           {isUser ? (
             <p className="whitespace-pre-wrap">{content}</p>
           ) : (
-            <div className="prose prose-invert prose-sm max-w-none">
+            <div className="prose prose-invert prose-sm max-w-none prose-headings:text-primary-300 prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-sm prose-p:text-surface-200 prose-p:leading-relaxed prose-strong:text-white prose-strong:font-semibold prose-ul:text-surface-200 prose-ol:text-surface-200 prose-li:marker:text-primary-400 prose-a:text-primary-400 prose-a:no-underline hover:prose-a:underline prose-blockquote:border-l-primary-500 prose-blockquote:text-surface-300 prose-hr:border-surface-700">
               <ReactMarkdown
                 components={{
                   code({ node, className, children, ...props }) {
                     const match = /language-(\w+)/.exec(className || "");
-                    const inline = !match;
+                    const inline = !match && !String(children).includes('\n');
                     return !inline ? (
                       <SyntaxHighlighter
                         style={oneDark as never}
-                        language={match[1]}
+                        language={match?.[1] || "text"}
                         PreTag="div"
-                        className="rounded-lg !bg-surface-900"
+                        className="rounded-lg !bg-surface-900 !my-3"
+                        customStyle={{
+                          fontSize: "0.85em",
+                          padding: "1em",
+                        }}
                       >
                         {String(children).replace(/\n$/, "")}
                       </SyntaxHighlighter>
                     ) : (
                       <code
-                        className="bg-surface-800 px-1.5 py-0.5 rounded text-primary-300"
+                        className="bg-surface-800/80 px-1.5 py-0.5 rounded text-primary-300 text-[0.9em] font-mono"
                         {...props}
                       >
                         {children}
                       </code>
+                    );
+                  },
+                  ul({ children }) {
+                    return <ul className="list-disc pl-4 space-y-1">{children}</ul>;
+                  },
+                  ol({ children }) {
+                    return <ol className="list-decimal pl-4 space-y-1">{children}</ol>;
+                  },
+                  li({ children }) {
+                    return <li className="text-surface-200">{children}</li>;
+                  },
+                  h1({ children }) {
+                    return <h1 className="text-lg font-bold text-primary-300 mt-4 mb-2 first:mt-0">{children}</h1>;
+                  },
+                  h2({ children }) {
+                    return <h2 className="text-base font-semibold text-primary-300 mt-3 mb-2">{children}</h2>;
+                  },
+                  h3({ children }) {
+                    return <h3 className="text-sm font-semibold text-primary-400 mt-2 mb-1">{children}</h3>;
+                  },
+                  p({ children }) {
+                    return <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>;
+                  },
+                  blockquote({ children }) {
+                    return (
+                      <blockquote className="border-l-4 border-primary-500 pl-4 my-2 text-surface-300 italic">
+                        {children}
+                      </blockquote>
+                    );
+                  },
+                  table({ children }) {
+                    return (
+                      <div className="overflow-x-auto my-3">
+                        <table className="min-w-full border-collapse border border-surface-700">
+                          {children}
+                        </table>
+                      </div>
+                    );
+                  },
+                  th({ children }) {
+                    return (
+                      <th className="border border-surface-700 px-3 py-2 bg-surface-800 text-left font-semibold text-surface-200">
+                        {children}
+                      </th>
+                    );
+                  },
+                  td({ children }) {
+                    return (
+                      <td className="border border-surface-700 px-3 py-2 text-surface-300">
+                        {children}
+                      </td>
                     );
                   },
                 }}
