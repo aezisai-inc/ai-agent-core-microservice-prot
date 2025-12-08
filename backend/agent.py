@@ -29,7 +29,7 @@ app = BedrockAgentCoreApp()
 
 # Get model from environment or use default
 # Note: Use direct model ID or inference profile (apac.* for Asia Pacific)
-MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
+MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "apac.amazon.nova-pro-v1:0")
 
 # System prompt for the agent
 SYSTEM_PROMPT = """あなたは優秀なカスタマーサポートアシスタントです。
