@@ -6,6 +6,9 @@
  * 
  * ⚠️ 重要: 機密情報をソースコードにハードコードしないこと。
  * すべての機密情報は環境変数経由で注入される。
+ * 
+ * ⚠️ Next.js 注意: process.env[dynamicKey] は動作しない。
+ * 静的な process.env.NEXT_PUBLIC_XXX のみがビルド時にインライン化される。
  */
 
 /**
@@ -29,34 +32,6 @@ interface EnvironmentConfig {
 }
 
 /**
- * 環境変数名のマッピング
- * config.ts と amplify-config.ts で統一された変数名を使用
- */
-const ENV_VAR_NAMES = {
-  // Cognito 関連 (2つのパターンをサポート)
-  USER_POOL_ID: ['NEXT_PUBLIC_COGNITO_USER_POOL_ID', 'NEXT_PUBLIC_USER_POOL_ID'],
-  CLIENT_ID: ['NEXT_PUBLIC_COGNITO_CLIENT_ID', 'NEXT_PUBLIC_USER_POOL_CLIENT_ID'],
-  IDENTITY_POOL_ID: ['NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID', 'NEXT_PUBLIC_IDENTITY_POOL_ID'],
-  // AgentCore 関連
-  AGENT_RUNTIME_ARN: ['NEXT_PUBLIC_AGENT_RUNTIME_ARN'],
-  AGENT_ENDPOINT_NAME: ['NEXT_PUBLIC_AGENT_ENDPOINT_NAME'],
-} as const;
-
-/**
- * 複数の環境変数名から値を取得
- * 優先順位順に設定された変数名をチェック
- */
-function getEnvValue(varNames: readonly string[]): string | undefined {
-  for (const name of varNames) {
-    const value = process.env[name];
-    if (value) {
-      return value;
-    }
-  }
-  return undefined;
-}
-
-/**
  * 環境変数のバリデーション
  * 
  * ビルド時とランタイム時の両方で動作するよう、
@@ -65,12 +40,6 @@ function getEnvValue(varNames: readonly string[]): string | undefined {
  */
 function validateEnvVar(name: string, value: string | undefined): string {
   if (!value) {
-    // ビルド時やローカル開発時はプレースホルダーを使用
-    // ランタイムで isConfigValid() をチェックして適切にハンドリング
-    if (typeof window === 'undefined') {
-      // SSR/ビルド時は警告のみ
-      console.warn(`[Config] Missing environment variable: ${name}. Using placeholder.`);
-    }
     return `PLACEHOLDER_${name}`;
   }
   return value;
@@ -83,29 +52,33 @@ function validateEnvVar(name: string, value: string | undefined): string {
  * 1. AWS Amplify: Secrets Manager → 環境変数として自動注入
  * 2. ローカル開発: .env.local ファイル（.gitignoreに含まれる）
  * 
- * 注意: 複数の環境変数名パターンをサポート（config.ts / amplify-config.ts の統一）
+ * ⚠️ 重要: Next.js では process.env[dynamicKey] は動作しない。
+ * 各環境変数は直接 process.env.NEXT_PUBLIC_XXX で参照する必要がある。
  */
 export function getConfig(): EnvironmentConfig {
+  // Next.js requires static property access for env vars to be inlined at build time
+  // process.env[dynamicKey] does NOT work - only process.env.STATIC_KEY works
   return {
     agentRuntimeArn: validateEnvVar(
       'NEXT_PUBLIC_AGENT_RUNTIME_ARN',
-      getEnvValue(ENV_VAR_NAMES.AGENT_RUNTIME_ARN)
+      process.env.NEXT_PUBLIC_AGENT_RUNTIME_ARN
     ),
     agentEndpointName: validateEnvVar(
       'NEXT_PUBLIC_AGENT_ENDPOINT_NAME',
-      getEnvValue(ENV_VAR_NAMES.AGENT_ENDPOINT_NAME)
+      process.env.NEXT_PUBLIC_AGENT_ENDPOINT_NAME
     ),
+    // Cognito: 両方のパターンをサポート（静的アクセスで OR 演算）
     cognitoUserPoolId: validateEnvVar(
       'NEXT_PUBLIC_COGNITO_USER_POOL_ID',
-      getEnvValue(ENV_VAR_NAMES.USER_POOL_ID)
+      process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID || process.env.NEXT_PUBLIC_USER_POOL_ID
     ),
     cognitoClientId: validateEnvVar(
       'NEXT_PUBLIC_COGNITO_CLIENT_ID',
-      getEnvValue(ENV_VAR_NAMES.CLIENT_ID)
+      process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID || process.env.NEXT_PUBLIC_USER_POOL_CLIENT_ID
     ),
     cognitoIdentityPoolId: validateEnvVar(
       'NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID',
-      getEnvValue(ENV_VAR_NAMES.IDENTITY_POOL_ID)
+      process.env.NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID || process.env.NEXT_PUBLIC_IDENTITY_POOL_ID
     ),
     awsRegion: process.env.NEXT_PUBLIC_AWS_REGION || 'ap-northeast-1',
     environment: process.env.NODE_ENV || 'development',
