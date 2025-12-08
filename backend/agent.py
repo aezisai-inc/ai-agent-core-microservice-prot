@@ -1,99 +1,52 @@
 """AgentCore Runtime Entrypoint.
 
 This is the main entry point for the Strands Agent running on
-Amazon Bedrock AgentCore Runtime. It handles:
-- Agent initialization
-- Request routing
-- Streaming responses
-- Memory integration
+Amazon Bedrock AgentCore Runtime.
 
-Usage:
-    # Local testing
-    agentcore configure --entrypoint agent.py
-    agentcore launch --local
-    agentcore invoke --local '{"prompt": "Hello"}'
-    
-    # Cloud deployment
-    agentcore launch
-    agentcore invoke '{"prompt": "Hello"}'
+Based on the official AgentCore documentation:
+https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-toolkit.html
 """
 
-import asyncio
 import json
-from typing import Any, AsyncIterator
+import os
+from typing import Any
 
 import structlog
-
-# Note: In production, import from bedrock_agentcore
-# from bedrock_agentcore import BedrockAgentCoreApp
-
-from src.infrastructure.config import get_container
-from src.presentation.entrypoint.agent_factory import create_agent, AgentConfig
+from bedrock_agentcore import BedrockAgentCoreApp
+from strands import Agent
 
 logger = structlog.get_logger()
 
-
 # ============================================================================
-# AgentCore App Simulation (for development)
-# In production, use: from bedrock_agentcore import BedrockAgentCoreApp
+# AgentCore App
 # ============================================================================
 
-class BedrockAgentCoreApp:
-    """Simulated BedrockAgentCoreApp for development.
-    
-    In production, this would be imported from bedrock_agentcore SDK.
-    This class provides the interface for registering entrypoints
-    and handling AgentCore Runtime invocations.
-    """
-    
-    def __init__(self):
-        self._entrypoint = None
-    
-    def entrypoint(self, func):
-        """Decorator to register the main entrypoint function."""
-        self._entrypoint = func
-        return func
-    
-    def run(self):
-        """Start the agent runtime."""
-        logger.info("agentcore_runtime_started")
-        # In production, this would start the AgentCore Runtime server
-    
-    async def invoke(self, payload: dict[str, Any]) -> AsyncIterator[str]:
-        """Invoke the registered entrypoint."""
-        if self._entrypoint is None:
-            raise RuntimeError("No entrypoint registered")
-        
-        async for chunk in self._entrypoint(payload):
-            yield chunk
-
-
-# ============================================================================
-# Agent Initialization
-# ============================================================================
-
-# Create the AgentCore app
 app = BedrockAgentCoreApp()
 
-# Initialize DI container and agent (lazy loading)
-_agent = None
+# ============================================================================
+# Agent Setup
+# ============================================================================
 
+# Get model from environment or use default
+MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "us.amazon.nova-pro-v1:0")
 
-def get_agent():
-    """Get or create the agent instance (singleton pattern)."""
-    global _agent
-    if _agent is None:
-        container = get_container()
-        _agent = create_agent(
-            container=container,
-            config=AgentConfig(
-                model_id="us.amazon.nova-pro-v1:0",
-                max_iterations=10,
-                temperature=0.7,
-            ),
-        )
-        logger.info("agent_initialized")
-    return _agent
+# System prompt for the agent
+SYSTEM_PROMPT = """あなたは優秀なカスタマーサポートアシスタントです。
+ユーザーの質問に対して、丁寧かつ的確に回答してください。
+
+## 回答のガイドライン
+- 簡潔で分かりやすい言葉を使う
+- 必要に応じて箇条書きを使用する
+- 不明な点があれば確認する
+"""
+
+# Initialize the Strands Agent
+agent = Agent(
+    model=MODEL_ID,
+    system_prompt=SYSTEM_PROMPT,
+)
+
+logger.info("agent_initialized", model_id=MODEL_ID)
 
 
 # ============================================================================
@@ -101,79 +54,55 @@ def get_agent():
 # ============================================================================
 
 @app.entrypoint
-async def invoke(payload: dict[str, Any]) -> AsyncIterator[str]:
+def invoke(payload: dict[str, Any]) -> dict[str, Any]:
     """AgentCore Runtime entrypoint.
     
     This function is called by AgentCore Runtime for each invocation.
-    It handles:
-    1. Parsing the input payload
-    2. Retrieving episodic memory context
-    3. Streaming the agent response
-    4. Saving interactions for future episode detection
     
     Args:
         payload: Request payload with the following structure:
             {
                 "prompt": "User's question",
-                "session_id": "sess-123",
-                "user_id": "user-456",
-                "tenant_id": "tenant-789",  # optional
-                "stream": true  # optional, default true
+                "session_id": "sess-123",  # optional
+                "user_id": "user-456",     # optional
             }
     
-    Yields:
-        Response chunks as strings (SSE format)
+    Returns:
+        Response dictionary with the agent's response
     """
     # Extract parameters from payload
     prompt = payload.get("prompt", "")
     session_id = payload.get("session_id", "default-session")
     user_id = payload.get("user_id", "default-user")
-    tenant_id = payload.get("tenant_id")
-    stream = payload.get("stream", True)
     
     if not prompt:
-        yield json.dumps({"error": "prompt is required"})
-        return
+        return {"error": "prompt is required"}
     
     logger.info(
         "agentcore_invocation_started",
         session_id=session_id,
         user_id=user_id,
-        tenant_id=tenant_id,
         prompt_preview=prompt[:50],
     )
     
     try:
-        agent = get_agent()
+        # Invoke the agent
+        result = agent(prompt)
         
-        if stream:
-            # Streaming response
-            async for chunk in agent.stream(
-                prompt=prompt,
-                session_id=session_id,
-                user_id=user_id,
-                tenant_id=tenant_id,
-            ):
-                # Format as SSE data
-                yield f"data: {json.dumps({'content': chunk})}\n\n"
-            
-            # Send completion signal
-            yield "data: [DONE]\n\n"
-        else:
-            # Non-streaming response
-            result = await agent.invoke(
-                prompt=prompt,
-                session_id=session_id,
-                user_id=user_id,
-                tenant_id=tenant_id,
-            )
-            yield json.dumps(result)
+        # Extract the response
+        response_text = result.message if hasattr(result, 'message') else str(result)
         
         logger.info(
             "agentcore_invocation_completed",
             session_id=session_id,
             user_id=user_id,
+            response_length=len(response_text),
         )
+        
+        return {
+            "response": response_text,
+            "session_id": session_id,
+        }
         
     except Exception as e:
         logger.error(
@@ -182,35 +111,7 @@ async def invoke(payload: dict[str, Any]) -> AsyncIterator[str]:
             session_id=session_id,
             user_id=user_id,
         )
-        yield json.dumps({"error": str(e)})
-
-
-# ============================================================================
-# Health Check Endpoint
-# ============================================================================
-
-async def health_check() -> dict[str, Any]:
-    """Health check for the agent runtime.
-    
-    Returns:
-        Health status dictionary
-    """
-    try:
-        container = get_container()
-        memory_healthy = await container.memory_client.health_check()
-        
-        return {
-            "status": "healthy" if memory_healthy else "degraded",
-            "components": {
-                "memory": "healthy" if memory_healthy else "unhealthy",
-                "agent": "healthy",
-            },
-        }
-    except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e),
-        }
+        return {"error": str(e)}
 
 
 # ============================================================================
@@ -218,22 +119,5 @@ async def health_check() -> dict[str, Any]:
 # ============================================================================
 
 if __name__ == "__main__":
-    # Start the AgentCore Runtime
+    # Start the AgentCore Runtime server
     app.run()
-    
-    # For local testing, you can also run:
-    # asyncio.run(test_invoke())
-
-async def test_invoke():
-    """Test function for local development."""
-    test_payload = {
-        "prompt": "製品の返品方法を教えてください",
-        "session_id": "test-session-001",
-        "user_id": "test-user-001",
-        "tenant_id": "test-tenant",
-    }
-    
-    print("Testing agent invocation...")
-    async for chunk in invoke(test_payload):
-        print(chunk, end="", flush=True)
-    print("\nDone!")
