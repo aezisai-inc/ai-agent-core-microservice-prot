@@ -7,7 +7,8 @@
 #   docker build -t agentic-rag-agent .
 #   docker run -p 8080:8080 agentic-rag-agent
 
-FROM python:3.11-slim
+# Use ECR Public Gallery to avoid Docker Hub rate limits
+FROM public.ecr.aws/docker/library/python:3.11-slim
 
 # Set working directory
 WORKDIR /app
