@@ -21,9 +21,14 @@ interface ChatContainerProps {
 
 /**
  * セッションID生成
+ * AgentCore Runtime は runtimeSessionId が33文字以上必要
  */
 function generateSessionId(): string {
-  return `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const timestamp = Date.now().toString(36);
+  const random1 = Math.random().toString(36).substring(2, 15);
+  const random2 = Math.random().toString(36).substring(2, 15);
+  // 確実に33文字以上になるようにする
+  return `session-${timestamp}-${random1}-${random2}`;
 }
 
 /**
