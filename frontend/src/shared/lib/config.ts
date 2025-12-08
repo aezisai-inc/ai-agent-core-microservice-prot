@@ -86,14 +86,52 @@ export function getConfig(): EnvironmentConfig {
 }
 
 /**
+ * AgentCore ARN をパースして Runtime ARN と Endpoint Name を分離
+ * 
+ * 入力形式のパターン:
+ * 1. フル ARN: arn:aws:bedrock-agentcore:REGION:ACCOUNT:runtime/RUNTIME_ID/runtime-endpoint/ENDPOINT_NAME
+ * 2. Runtime ARN のみ: arn:aws:bedrock-agentcore:REGION:ACCOUNT:runtime/RUNTIME_ID
+ * 
+ * @param arn - AgentCore ARN（フル形式または Runtime のみ）
+ * @param endpointName - 環境変数で別途指定された Endpoint Name（オプション）
+ * @returns { runtimeArn, endpointName }
+ */
+function parseAgentCoreArn(arn: string, endpointName?: string): { runtimeArn: string; endpointName: string } {
+  // フル ARN パターン: runtime-endpoint を含む場合
+  const fullArnPattern = /^(arn:aws:bedrock-agentcore:[^:]+:[^:]+:runtime\/[^/]+)\/runtime-endpoint\/(.+)$/;
+  const match = arn.match(fullArnPattern);
+  
+  if (match) {
+    // フル ARN から Runtime ARN と Endpoint Name を抽出
+    return {
+      runtimeArn: match[1],
+      endpointName: endpointName || match[2], // 環境変数で指定があればそちらを優先
+    };
+  }
+  
+  // Runtime ARN のみの場合
+  return {
+    runtimeArn: arn,
+    endpointName: endpointName || '',
+  };
+}
+
+/**
  * AgentCore 設定を取得
  */
 export function getAgentCoreConfig() {
   const config = getConfig();
+  
+  // ARN をパースして Runtime ARN と Endpoint Name を分離
+  const { runtimeArn, endpointName } = parseAgentCoreArn(
+    config.agentRuntimeArn,
+    config.agentEndpointName
+  );
+  
   return {
     region: config.awsRegion,
-    agentRuntimeArn: config.agentRuntimeArn,
-    agentEndpointName: config.agentEndpointName,
+    agentRuntimeArn: runtimeArn,
+    agentEndpointName: endpointName,
     identityPoolId: config.cognitoIdentityPoolId,
     userPoolId: config.cognitoUserPoolId,
   };
@@ -133,10 +171,11 @@ export function isAuthConfigValid(): boolean {
  */
 export function isAgentCoreConfigValid(): boolean {
   try {
-    const config = getConfig();
+    const config = getAgentCoreConfig();
     return (
       !config.agentRuntimeArn.startsWith('PLACEHOLDER_') &&
-      !config.agentEndpointName.startsWith('PLACEHOLDER_')
+      config.agentRuntimeArn.includes('bedrock-agentcore') &&
+      config.agentEndpointName.length > 0
     );
   } catch {
     return false;
