@@ -7,6 +7,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { ChevronDown, ChevronUp, BookOpen } from "lucide-react";
 import { Avatar } from "../atoms/avatar";
+import { MermaidDiagram } from "../atoms/mermaid-diagram";
 import { SourceCard } from "./source-card";
 import { cn } from "@/shared/lib/utils";
 
@@ -78,11 +79,19 @@ export function MessageBubble({
                 components={{
                   code({ node, className, children, ...props }) {
                     const match = /language-(\w+)/.exec(className || "");
+                    const language = match?.[1] || "";
+                    const codeContent = String(children).replace(/\n$/, "");
                     const inline = !match && !String(children).includes('\n');
+                    
+                    // Mermaid 図表の場合
+                    if (language === "mermaid") {
+                      return <MermaidDiagram chart={codeContent} className="my-3" />;
+                    }
+                    
                     return !inline ? (
                       <SyntaxHighlighter
                         style={oneDark as never}
-                        language={match?.[1] || "text"}
+                        language={language || "text"}
                         PreTag="div"
                         className="rounded-lg !bg-surface-900 !my-3"
                         customStyle={{
@@ -90,7 +99,7 @@ export function MessageBubble({
                           padding: "1em",
                         }}
                       >
-                        {String(children).replace(/\n$/, "")}
+                        {codeContent}
                       </SyntaxHighlighter>
                     ) : (
                       <code
