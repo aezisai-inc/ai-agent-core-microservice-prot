@@ -82,6 +82,85 @@ export interface InvokeResponse {
 }
 
 /**
+ * AgentCore Runtime レスポンスからテキストを抽出
+ * 
+ * AgentCore Runtime は以下のような形式で応答を返す:
+ * {"response": {"role": "assistant", "content": [{"text": "..."}]}, "session_id": "..."}
+ * 
+ * または Strands Agent の形式:
+ * {"response": "テキスト", "session_id": "..."}
+ * 
+ * @param data パースされたJSONデータ
+ * @returns 抽出されたテキスト、または null
+ */
+function extractTextFromResponse(data: unknown): string | null {
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+  
+  const obj = data as Record<string, unknown>;
+  
+  // Format 1: {"response": "text", ...} (Strands Agent simple format)
+  if (typeof obj.response === 'string') {
+    return obj.response;
+  }
+  
+  // Format 2: {"response": {"role": "assistant", "content": [{"text": "..."}]}, ...}
+  // (Claude/Bedrock format via AgentCore)
+  if (obj.response && typeof obj.response === 'object') {
+    const resp = obj.response as Record<string, unknown>;
+    
+    // Content array format: [{"text": "..."}]
+    if (Array.isArray(resp.content)) {
+      const textParts = resp.content
+        .filter((item): item is { text: string } => 
+          item && typeof item === 'object' && 'text' in item && typeof (item as Record<string, unknown>).text === 'string'
+        )
+        .map(item => item.text);
+      
+      if (textParts.length > 0) {
+        return textParts.join('');
+      }
+    }
+    
+    // Simple content format: {"content": "text"}
+    if (typeof resp.content === 'string') {
+      return resp.content;
+    }
+    
+    // Message format: {"message": "text"}
+    if (typeof resp.message === 'string') {
+      return resp.message;
+    }
+  }
+  
+  // Format 3: {"content": [{"text": "..."}]} (direct content array)
+  if (Array.isArray(obj.content)) {
+    const textParts = obj.content
+      .filter((item): item is { text: string } => 
+        item && typeof item === 'object' && 'text' in item && typeof (item as Record<string, unknown>).text === 'string'
+      )
+      .map(item => item.text);
+    
+    if (textParts.length > 0) {
+      return textParts.join('');
+    }
+  }
+  
+  // Format 4: {"text": "..."} (simple text format)
+  if (typeof obj.text === 'string') {
+    return obj.text;
+  }
+  
+  // Format 5: {"message": "..."} (message format)
+  if (typeof obj.message === 'string') {
+    return obj.message;
+  }
+  
+  return null;
+}
+
+/**
  * AgentCore Runtime クライアント
  * AWS SDK を使用して直接 AgentCore を呼び出す
  */
@@ -216,7 +295,14 @@ export class AgentCoreClient {
               try {
                 const data = JSON.parse(jsonStr);
                 
-                if (data.type === 'text' && data.content) {
+                // AgentCore Runtime レスポンス形式を正しく解析
+                // Format: {"response": {"role": "assistant", "content": [{"text": "..."}]}, "session_id": "..."}
+                const extractedText = extractTextFromResponse(data);
+                
+                if (extractedText) {
+                  fullResponse += extractedText;
+                  yield { type: 'text', content: extractedText };
+                } else if (data.type === 'text' && data.content) {
                   fullResponse += data.content;
                   yield { type: 'text', content: data.content };
                 } else if (data.type === 'sources' && data.sources) {
@@ -230,7 +316,7 @@ export class AgentCoreClient {
                   };
                 } else if (data.type === 'tool_result') {
                   yield { type: 'tool_result', toolResult: data.result };
-                } else if (data.content) {
+                } else if (data.content && typeof data.content === 'string') {
                   fullResponse += data.content;
                   yield { type: 'text', content: data.content };
                 } else if (typeof data === 'string') {
@@ -260,7 +346,9 @@ export class AgentCoreClient {
           
           try {
             const data = JSON.parse(text);
-            fullResponse = data.content || data.response || text;
+            // AgentCore レスポンス形式を正しく解析
+            const extractedText = extractTextFromResponse(data);
+            fullResponse = extractedText || text;
           } catch {
             fullResponse = text;
           }
