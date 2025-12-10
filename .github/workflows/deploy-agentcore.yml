@@ -89,35 +89,57 @@ jobs:
           # Install latest boto3 with bedrock-agentcore-control support
           pip install -q "boto3>=1.35.0"
           
-          # Get account ID
+          # Get account ID and set environment variables
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          ECR_URI="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest"
-          ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/agentcore-runtime-role-development"
+          export ECR_URI="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest"
+          export ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/agentcore-runtime-role-development"
+          export AWS_REGION="${{ env.AWS_REGION }}"
+          export AGENT_RUNTIME_ID="${{ env.AGENT_RUNTIME_ID }}"
           
-          python3 << EOF
+          echo "ECR_URI: $ECR_URI"
+          echo "ROLE_ARN: $ROLE_ARN"
+          
+          python3 << 'PYTHON_EOF'
           import boto3
-          client = boto3.client('bedrock-agentcore-control', region_name='${{ env.AWS_REGION }}')
+          import os
+          
+          ecr_uri = os.environ['ECR_URI']
+          role_arn = os.environ['ROLE_ARN']
+          region = os.environ['AWS_REGION']
+          runtime_id = os.environ['AGENT_RUNTIME_ID']
+          
+          print(f"Updating runtime: {runtime_id}")
+          print(f"ECR URI: {ecr_uri}")
+          
+          client = boto3.client('bedrock-agentcore-control', region_name=region)
           client.update_agent_runtime(
-              agentRuntimeId='${{ env.AGENT_RUNTIME_ID }}',
-              agentRuntimeArtifact={'containerConfiguration': {'containerUri': '${ECR_URI}'}},
-              roleArn='${ROLE_ARN}',
+              agentRuntimeId=runtime_id,
+              agentRuntimeArtifact={'containerConfiguration': {'containerUri': ecr_uri}},
+              roleArn=role_arn,
               networkConfiguration={'networkMode': 'PUBLIC'}
           )
           print("✅ AgentCore Runtime update initiated")
-          EOF
+          PYTHON_EOF
 
       - name: Wait for AgentCore Runtime
+        env:
+          RUNTIME_ID: ${{ env.AGENT_RUNTIME_ID }}
+          REGION: ${{ env.AWS_REGION }}
         run: |
           echo "⏳ Waiting for AgentCore Runtime to be ready..."
           
-          python3 << EOF
+          python3 << 'PYTHON_EOF'
           import boto3
           import time
+          import os
           
-          client = boto3.client('bedrock-agentcore-control', region_name='${{ env.AWS_REGION }}')
+          region = os.environ['REGION']
+          runtime_id = os.environ['RUNTIME_ID']
+          
+          client = boto3.client('bedrock-agentcore-control', region_name=region)
           
           for i in range(15):
-              response = client.get_agent_runtime(agentRuntimeId='${{ env.AGENT_RUNTIME_ID }}')
+              response = client.get_agent_runtime(agentRuntimeId=runtime_id)
               status = response.get('status', 'UNKNOWN')
               print(f"[{i+1}/15] Status: {status}")
               
@@ -131,7 +153,7 @@ jobs:
               time.sleep(10)
           
           print("⚠️ Timeout - check AWS Console")
-          EOF
+          PYTHON_EOF
 
       - name: Deployment Summary
         run: |
