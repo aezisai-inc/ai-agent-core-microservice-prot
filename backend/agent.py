@@ -162,7 +162,8 @@ class KnowledgeBaseClient:
                 retrievalConfiguration={
                     "vectorSearchConfiguration": {
                         "numberOfResults": top_k,
-                        "overrideSearchType": "HYBRID",
+                        # Note: HYBRID search is not supported by S3 Vectors
+                        # Use default SEMANTIC search instead
                     }
                 },
             )
