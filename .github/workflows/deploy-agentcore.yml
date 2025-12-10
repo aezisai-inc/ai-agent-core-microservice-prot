@@ -1,0 +1,151 @@
+# AgentCore Runtime 自動デプロイ
+#
+# develop ブランチへの push/merge 時に自動的に:
+# 1. CodeBuild でイメージをビルド
+# 2. AgentCore Runtime を更新
+#
+name: Deploy AgentCore Runtime
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-agentcore.yml'
+
+env:
+  AWS_REGION: ap-northeast-1
+  CODEBUILD_PROJECT: agentic-rag-build-development
+  AGENT_RUNTIME_ID: agentcoreRuntimeDevelopment-D7hv2Z5zVV
+  ECR_REPOSITORY: agentic-rag-agent-development
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Start CodeBuild
+        id: codebuild
+        run: |
+          echo "🔨 Starting CodeBuild..."
+          BUILD_ID=$(aws codebuild start-build \
+            --project-name ${{ env.CODEBUILD_PROJECT }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'build.id' \
+            --output text)
+          echo "build_id=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "Build ID: $BUILD_ID"
+
+      - name: Wait for CodeBuild
+        run: |
+          echo "⏳ Waiting for CodeBuild to complete..."
+          BUILD_ID="${{ steps.codebuild.outputs.build_id }}"
+          
+          for i in {1..30}; do
+            STATUS=$(aws codebuild batch-get-builds \
+              --ids "$BUILD_ID" \
+              --region ${{ env.AWS_REGION }} \
+              --query 'builds[0].buildStatus' \
+              --output text)
+            echo "[$i/30] Status: $STATUS"
+            
+            if [ "$STATUS" = "SUCCEEDED" ]; then
+              echo "✅ CodeBuild succeeded!"
+              exit 0
+            elif [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "STOPPED" ]; then
+              echo "❌ CodeBuild failed: $STATUS"
+              exit 1
+            fi
+            
+            sleep 20
+          done
+          
+          echo "❌ Timeout waiting for CodeBuild"
+          exit 1
+
+      - name: Update AgentCore Runtime
+        run: |
+          echo "🚀 Updating AgentCore Runtime..."
+          
+          # Get account ID
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_URI="${ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest"
+          ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/agentcore-runtime-role-development"
+          
+          # Update runtime
+          aws bedrock-agentcore-control update-agent-runtime \
+            --agent-runtime-id ${{ env.AGENT_RUNTIME_ID }} \
+            --agent-runtime-artifact "{\"containerConfiguration\":{\"containerUri\":\"${ECR_URI}\"}}" \
+            --role-arn "$ROLE_ARN" \
+            --network-configuration '{"networkMode":"PUBLIC"}' \
+            --region ${{ env.AWS_REGION }} || {
+              echo "⚠️ AWS CLI doesn't support bedrock-agentcore-control yet"
+              echo "Using boto3 fallback..."
+              pip install boto3 -q
+              python3 << EOF
+          import boto3
+          client = boto3.client('bedrock-agentcore-control', region_name='${{ env.AWS_REGION }}')
+          client.update_agent_runtime(
+              agentRuntimeId='${{ env.AGENT_RUNTIME_ID }}',
+              agentRuntimeArtifact={'containerConfiguration': {'containerUri': '${ECR_URI}'}},
+              roleArn='${ROLE_ARN}',
+              networkConfiguration={'networkMode': 'PUBLIC'}
+          )
+          print("✅ AgentCore Runtime update initiated")
+          EOF
+            }
+
+      - name: Wait for AgentCore Runtime
+        run: |
+          echo "⏳ Waiting for AgentCore Runtime to be ready..."
+          pip install boto3 -q
+          
+          python3 << EOF
+          import boto3
+          import time
+          
+          client = boto3.client('bedrock-agentcore-control', region_name='${{ env.AWS_REGION }}')
+          
+          for i in range(15):
+              response = client.get_agent_runtime(agentRuntimeId='${{ env.AGENT_RUNTIME_ID }}')
+              status = response.get('status', 'UNKNOWN')
+              print(f"[{i+1}/15] Status: {status}")
+              
+              if status in ['READY', 'ACTIVE']:
+                  print("✅ AgentCore Runtime is ready!")
+                  exit(0)
+              elif status == 'FAILED':
+                  print("❌ Update failed")
+                  exit(1)
+              
+              time.sleep(10)
+          
+          print("⚠️ Timeout - check AWS Console")
+          EOF
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| CodeBuild | ✅ Succeeded |" >> $GITHUB_STEP_SUMMARY
+          echo "| ECR Image | ✅ Pushed |" >> $GITHUB_STEP_SUMMARY
+          echo "| AgentCore Runtime | ✅ Updated |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test URL**: https://develop.d3v4jy5nhse7op.amplifyapp.com/" >> $GITHUB_STEP_SUMMARY
+
