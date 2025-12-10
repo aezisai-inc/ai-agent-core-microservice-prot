@@ -39,6 +39,13 @@ COPY agent.py .
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
+# AgentCore Configuration
+# Knowledge Base ID for RAG retrieval
+ENV KNOWLEDGE_BASE_ID=KCOEXQD1NV
+ENV RAG_TOP_K=5
+ENV RAG_SCORE_THRESHOLD=0.5
+ENV AWS_REGION=ap-northeast-1
+
 # Expose port for health checks (optional)
 EXPOSE 8080
 
