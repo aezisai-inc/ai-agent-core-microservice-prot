@@ -1,335 +1,415 @@
-# RAG 実装分析レポート
+# RAG 実装アーキテクチャ
+
+**最終更新**: 2025年12月10日  
+**ステータス**: ✅ 本番稼働中
+
+---
 
 ## 概要
 
-このドキュメントは、現状のAgentCore RAG実装経路と、理想的な実装経路を分析・比較したものです。
+AgentCore Runtime と Bedrock Knowledge Base (S3 Vectors) を統合した RAG（Retrieval-Augmented Generation）システムの実装アーキテクチャです。
 
 ---
 
-## 問題サマリー
+## システム構成
 
-| 項目 | 現状 | 理想 |
-|------|------|------|
-| Knowledge Base 検索 | ❌ 未使用 | ✅ S3Vector から検索 |
-| RAG コンテキスト注入 | ❌ なし | ✅ プロンプトに埋め込み |
-| `docs/sample/` 参照 | ❌ 不可能 | ✅ 可能 |
-| 使用中のエントリポイント | `agent.py` | `agent_factory.py` |
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Frontend (Amplify)                          │
+│                   https://develop.d3v4jy5nhse7op.amplifyapp.com     │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      AgentCore Runtime                              │
+│              agentcoreRuntimeDevelopment-D7hv2Z5zVV                 │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │                     agent.py (Docker)                         │  │
+│  │  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────┐  │  │
+│  │  │ SSMConfig   │  │ KBClient     │  │ Strands Agent       │  │  │
+│  │  │ Loader      │  │ (Retrieve)   │  │ (Nova Pro)          │  │  │
+│  │  └─────────────┘  └──────────────┘  └─────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+         │                      │                      │
+         ▼                      ▼                      ▼
+┌─────────────┐    ┌────────────────────┐    ┌─────────────────┐
+│ SSM         │    │ Knowledge Base     │    │ Amazon Bedrock  │
+│ Parameter   │    │ (S3 Vectors)       │    │ (Nova Pro)      │
+│ Store       │    │ KCOEXQD1NV         │    │                 │
+└─────────────┘    └────────────────────┘    └─────────────────┘
+                            │
+                            ▼
+                   ┌─────────────────┐
+                   │ S3 Documents    │
+                   │ docs/sample/    │
+                   │ - product-guide │
+                   │ - api-reference │
+                   │ - faq           │
+                   └─────────────────┘
+```
 
 ---
 
-## 現状のシーケンス図 (AS-IS)
+## シーケンス図
+
+### 正常系フロー
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant User as ユーザー (Frontend)
-    participant AgentCore as AgentCore Runtime
-    participant Agent as agent.py
-    participant Strands as Strands Agent
+    participant User as ユーザー<br/>(Frontend)
+    participant AgentCore as AgentCore<br/>Runtime
+    participant Agent as agent.py<br/>(Container)
+    participant SSM as SSM<br/>Parameter Store
+    participant KB as Knowledge Base<br/>(S3 Vectors)
     participant Bedrock as Amazon Bedrock<br/>(Nova Pro)
     
-    User->>AgentCore: invoke_agent_runtime<br/>(prompt, sessionId)
+    User->>AgentCore: invoke_agent_runtime<br/>{"prompt": "製品の価格プランは？"}
     AgentCore->>Agent: invoke(payload)
     
-    Note over Agent: ❌ RAG検索なし
-    Note over Agent: ❌ Knowledge Base未使用
-    
-    Agent->>Strands: agent(prompt)
-    Strands->>Bedrock: InvokeModel<br/>(Nova Pro)
-    Bedrock-->>Strands: 生成テキスト
-    Strands-->>Agent: result.message
-    Agent-->>AgentCore: {"response": "...", "session_id": "..."}
-    AgentCore-->>User: レスポンス
-    
-    Note over User: ⚠️ 一般的な回答のみ<br/>ドキュメント参照なし
-```
-
-### 現状のコード (`agent.py`)
-
-```python
-# ❌ 問題: RAG統合なし
-agent = Agent(
-    model=MODEL_ID,
-    system_prompt=SYSTEM_PROMPT,  # 固定プロンプトのみ
-)
-
-@app.entrypoint
-def invoke(payload):
-    prompt = payload.get("prompt", "")
-    result = agent(prompt)  # 直接呼び出し、RAGなし
-    return {"response": result.message}
-```
-
----
-
-## 現状のアクティビティ図 (AS-IS)
-
-```mermaid
-flowchart TD
-    subgraph Frontend
-        A[ユーザーが質問入力]
+    rect rgb(230, 245, 255)
+        Note over Agent,SSM: 1. 設定読み込み
+        Agent->>SSM: get_parameter<br/>("/agentcore/development/knowledge-base-id")
+        SSM-->>Agent: KCOEXQD1NV
     end
     
-    subgraph AgentCore Runtime
-        B[invoke_agent_runtime]
-        C[agent.py: invoke]
+    rect rgb(230, 255, 230)
+        Note over Agent,KB: 2. RAG 検索 (SEMANTIC)
+        Agent->>KB: retrieve(query)<br/>numberOfResults: 5
+        KB->>KB: ベクトル検索<br/>(S3 Vectors)
+        KB-->>Agent: 関連チャンク 3件<br/>Score: 0.619, 0.597, 0.584
     end
     
-    subgraph "Strands Agent (現状)"
-        D[Agent初期化<br/>model + system_prompt のみ]
-        E[agent prompt を直接実行]
+    rect rgb(255, 250, 230)
+        Note over Agent: 3. コンテキスト構築
+        Agent->>Agent: build_rag_context(chunks)
+        Note over Agent: "## 参照ドキュメント<br/>スターター: ¥10,000<br/>プロフェッショナル: ¥50,000"
     end
     
-    subgraph Amazon Bedrock
-        F[Nova Pro モデル呼び出し]
-        G[一般的な応答生成]
+    rect rgb(245, 230, 255)
+        Note over Agent,Bedrock: 4. LLM 呼び出し
+        Agent->>Bedrock: InvokeModel<br/>(system_prompt + rag_context + prompt)
+        Bedrock-->>Agent: ドキュメント参照した回答
     end
     
-    subgraph "❌ 未使用コンポーネント"
-        X1[S3VectorClient]
-        X2[Knowledge Base]
-        X3[RAG Context Builder]
-        X4[docs/sample/*.md]
-    end
-    
-    A --> B
-    B --> C
-    C --> D
-    D --> E
-    E --> F
-    F --> G
-    G --> |一般的な回答| A
-    
-    X1 -.->|未接続| E
-    X2 -.->|未接続| X1
-    X4 -.->|インジェスト済みだが<br/>検索されない| X2
-    
-    style X1 fill:#ffcccc,stroke:#ff0000
-    style X2 fill:#ffcccc,stroke:#ff0000
-    style X3 fill:#ffcccc,stroke:#ff0000
-    style X4 fill:#ffcccc,stroke:#ff0000
-```
-
----
-
-## 理想的なシーケンス図 (TO-BE)
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant User as ユーザー (Frontend)
-    participant AgentCore as AgentCore Runtime
-    participant Agent as agent.py (修正版)
-    participant Factory as AgentFactory
-    participant Wrapper as StrandsAgentWrapper
-    participant S3Vector as S3VectorClient
-    participant KB as Knowledge Base<br/>(Bedrock)
-    participant Bedrock as Amazon Bedrock<br/>(Nova Pro)
-    
-    User->>AgentCore: invoke_agent_runtime<br/>(prompt, sessionId)
-    AgentCore->>Agent: invoke(payload)
-    
-    rect rgb(200, 255, 200)
-        Note over Agent,Factory: ✅ RAG 統合フロー
-        Agent->>Factory: create_agent(tenant_id)
-        Factory->>Wrapper: StrandsAgentWrapper 生成
-    end
-    
-    Agent->>Wrapper: invoke(prompt, session_id, user_id)
-    
-    rect rgb(200, 220, 255)
-        Note over Wrapper,KB: ✅ RAG 検索フェーズ
-        Wrapper->>S3Vector: search(prompt, tenant_id)
-        S3Vector->>KB: retrieve(query)
-        KB-->>S3Vector: 関連チャンク (docs/sample/*.md)
-        S3Vector-->>Wrapper: RAG結果 [content, score, source]
-    end
-    
-    rect rgb(255, 255, 200)
-        Note over Wrapper: コンテキスト構築
-        Wrapper->>Wrapper: _build_rag_context(chunks)
-        Wrapper->>Wrapper: build_system_prompt<br/>(base + rag_context)
-    end
-    
-    Wrapper->>Bedrock: InvokeModel<br/>(enriched_prompt)
-    Bedrock-->>Wrapper: 生成テキスト
-    
-    Wrapper-->>Agent: {"content": "...", "rag_chunks_used": N}
     Agent-->>AgentCore: {"response": "...", "sources": [...]}
-    AgentCore-->>User: ドキュメント参照付き回答
-    
-    Note over User: ✅ docs/sample/ の内容を参照した回答
+    AgentCore-->>User: ✅ 正確な回答<br/>スターター: ¥10,000
 ```
 
 ---
 
-## 理想的なアクティビティ図 (TO-BE)
+## アクティビティ図
+
+### RAG 処理フロー
 
 ```mermaid
 flowchart TD
-    subgraph Frontend
-        A[ユーザーが質問入力]
-        Z[ドキュメント参照付き回答を表示]
+    subgraph Frontend["🌐 Frontend (Amplify)"]
+        A[ユーザーが質問入力<br/>"製品の価格プランは？"]
+        Z[✅ 正確な回答を表示<br/>スターター: ¥10,000<br/>プロフェッショナル: ¥50,000]
     end
     
-    subgraph AgentCore Runtime
+    subgraph AgentCore["🚀 AgentCore Runtime"]
         B[invoke_agent_runtime]
         C[agent.py: invoke]
     end
     
-    subgraph "Agent Factory"
-        D[AgentFactory.create_agent]
-        E[StrandsAgentWrapper 生成]
+    subgraph Config["⚙️ 設定読み込み"]
+        D[SSMConfigLoader]
+        E{SSM パラメータ<br/>取得成功?}
+        E1[knowledge-base-id<br/>= KCOEXQD1NV]
+        E2[デフォルト値使用<br/>top_k=5, threshold=0.5]
     end
     
-    subgraph "RAG Pipeline ✅"
-        F[S3VectorClient.search]
-        G[Knowledge Base 検索]
-        H[関連チャンク取得<br/>docs/sample/*.md]
-        I[_build_rag_context]
+    subgraph RAG["🔍 RAG Pipeline"]
+        F[KnowledgeBaseClient]
+        G[bedrock:Retrieve API]
+        H{チャンク<br/>取得成功?}
+        I[関連チャンク 3件<br/>product-guide.md: 0.619<br/>api-reference.md: 0.597]
+        J[空のコンテキスト]
     end
     
-    subgraph "Prompt Engineering"
-        J[build_system_prompt]
-        K[base_prompt + rag_context<br/>+ episodic_context]
+    subgraph Context["📝 コンテキスト構築"]
+        K[build_rag_context]
+        L["## 参照ドキュメント<br/>| スターター | ¥10,000 |<br/>| プロフェッショナル | ¥50,000 |"]
     end
     
-    subgraph Amazon Bedrock
-        L[Nova Pro モデル呼び出し<br/>enriched_prompt]
-        M[ドキュメント参照した<br/>回答生成]
+    subgraph LLM["🤖 Strands Agent"]
+        M[Agent 初期化<br/>enriched_system_prompt]
+        N[agent prompt 実行]
+    end
+    
+    subgraph Bedrock["☁️ Amazon Bedrock"]
+        O[Nova Pro 呼び出し]
+        P[ドキュメント参照した<br/>回答生成]
     end
     
     A --> B
     B --> C
     C --> D
     D --> E
-    E --> F
+    E -->|Yes| E1
+    E -->|No| E2
+    E1 --> F
+    E2 --> F
     F --> G
     G --> H
-    H --> I
-    I --> J
+    H -->|Yes| I
+    H -->|No| J
+    I --> K
     J --> K
     K --> L
     L --> M
-    M --> Z
+    M --> N
+    N --> O
+    O --> P
+    P --> Z
     
-    style F fill:#ccffcc,stroke:#00aa00
-    style G fill:#ccffcc,stroke:#00aa00
-    style H fill:#ccffcc,stroke:#00aa00
-    style I fill:#ccffcc,stroke:#00aa00
+    style A fill:#e3f2fd
+    style Z fill:#e8f5e9
+    style I fill:#c8e6c9
+    style L fill:#fff3e0
+    style P fill:#f3e5f5
 ```
 
 ---
 
-## ファイル構成と役割
+## コンポーネント詳細
 
-```
-backend/
-├── agent.py                          # ❌ 現在のエントリポイント (RAGなし)
-│
-├── src/
-│   ├── presentation/
-│   │   ├── entrypoint/
-│   │   │   ├── agent_factory.py      # ✅ RAG統合済み (未使用)
-│   │   │   └── prompts.py            # ✅ build_system_prompt
-│   │   │
-│   │   └── tools/
-│   │       └── knowledge_tool.py     # ✅ KB検索ツール (未使用)
-│   │
-│   └── infrastructure/
-│       └── external_services/
-│           └── s3vector/
-│               └── s3vector_client.py # ✅ S3Vector クライアント (未使用)
+### 1. SSMConfigLoader
 
-docs/sample/
-├── api-reference.md                   # サンプルドキュメント
-├── faq.md                             # サンプルドキュメント
-└── product-guide.md                   # サンプルドキュメント
-```
-
----
-
-## 修正方針
-
-### Option 1: `agent.py` を修正して既存インフラを使用
+SSM Parameter Store から設定を読み込むクラス。
 
 ```python
-# agent.py (修正案)
-from src.presentation.entrypoint.agent_factory import create_agent, AgentConfig
-from src.infrastructure.config.di_container import get_container
-
-# DI コンテナ取得
-container = get_container()
-
-# RAG対応エージェント作成
-agent_wrapper = create_agent(
-    container=container,
-    config=AgentConfig(model_id=MODEL_ID),
-    tenant_id="default",
-)
-
-@app.entrypoint
-async def invoke(payload: dict[str, Any]) -> dict[str, Any]:
-    prompt = payload.get("prompt", "")
-    session_id = payload.get("session_id", "default-session")
-    user_id = payload.get("user_id", "default-user")
+class SSMConfigLoader:
+    def __init__(self, region: str, environment: str):
+        self._client = boto3.client("ssm", region_name=region)
+        self._prefix = f"/agentcore/{environment}"
     
-    # RAG統合版の呼び出し
-    result = await agent_wrapper.invoke(
-        prompt=prompt,
-        session_id=session_id,
-        user_id=user_id,
-    )
+    def get(self, key: str, default: str = "") -> str:
+        # /agentcore/development/{key} から値を取得
+        # キャッシュ機能付き
+```
+
+**読み込むパラメータ**:
+| パラメータ | 値 | 説明 |
+|-----------|-----|------|
+| `knowledge-base-id` | `KCOEXQD1NV` | Knowledge Base ID |
+| `rag-top-k` | `5` (default) | 取得チャンク数 |
+| `rag-score-threshold` | `0.5` (default) | 最低スコア閾値 |
+
+---
+
+### 2. KnowledgeBaseClient
+
+Bedrock Knowledge Base から関連ドキュメントを検索。
+
+```python
+class KnowledgeBaseClient:
+    def retrieve(self, query: str, top_k: int = 5, score_threshold: float = 0.5):
+        response = self._client.retrieve(
+            knowledgeBaseId=self._knowledge_base_id,
+            retrievalQuery={"text": query},
+            retrievalConfiguration={
+                "vectorSearchConfiguration": {
+                    "numberOfResults": top_k,
+                    # SEMANTIC search (default)
+                    # Note: HYBRID is NOT supported by S3 Vectors
+                }
+            }
+        )
+        # score_threshold 以上のチャンクのみ返す
+```
+
+**重要**: S3 Vectors は `HYBRID` 検索をサポートしていないため、デフォルトの `SEMANTIC` 検索を使用。
+
+---
+
+### 3. build_rag_context
+
+取得したチャンクから RAG コンテキストを構築。
+
+```python
+def build_rag_context(chunks: list[dict]) -> str:
+    context_parts = ["## 参照ドキュメント\n"]
+    context_parts.append("以下の社内ドキュメントを参考に回答してください。\n")
     
-    return {
-        "response": result["content"],
-        "sources": result.get("rag_chunks_used", 0),
-        "session_id": session_id,
+    for i, chunk in enumerate(chunks[:5], 1):
+        content = chunk.get("content", "")[:800]
+        source = chunk.get("source", "Unknown")
+        score = chunk.get("score", 0.0)
+        
+        context_parts.append(f"### ドキュメント {i} (関連度: {score:.2f})")
+        context_parts.append(f"**ソース**: {source}")
+        context_parts.append(f"```\n{content}\n```\n")
+    
+    return "\n".join(context_parts)
+```
+
+---
+
+### 4. System Prompt
+
+RAG コンテキストを含む enriched system prompt。
+
+```python
+BASE_SYSTEM_PROMPT = """あなたは優秀なカスタマーサポートアシスタントです。
+
+## 回答のガイドライン
+- 参照ドキュメントが提供されている場合は、その内容を優先して回答する
+- ドキュメントに記載がない場合は、その旨を伝える
+- 簡潔で分かりやすい言葉を使う
+
+## 重要
+- 参照ドキュメントの内容に基づいて回答してください
+- ドキュメントに記載されていない情報を推測で答えないでください
+"""
+
+# RAG コンテキストを追加
+enriched_system_prompt = f"{BASE_SYSTEM_PROMPT}\n\n{rag_context}"
+```
+
+---
+
+## IAM 権限
+
+### AgentCore Runtime Role
+
+`agentcore-runtime-role-development` に必要な権限:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockKnowledgeBase",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:Retrieve",
+        "bedrock:RetrieveAndGenerate"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:ap-northeast-1:226484346947:knowledge-base/*"
+      ]
+    },
+    {
+      "Sid": "SSMParameterStore",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter",
+        "ssm:GetParameters"
+      ],
+      "Resource": [
+        "arn:aws:ssm:ap-northeast-1:226484346947:parameter/agentcore/*"
+      ]
+    },
+    {
+      "Sid": "BedrockInvokeModel",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": "*"
     }
-```
-
-### Option 2: Strands Agent に直接 RAG Tool を追加
-
-```python
-from strands import Agent, tool
-from src.presentation.tools.knowledge_tool import create_knowledge_tool
-
-# RAG ツールを作成
-search_kb = create_knowledge_tool(
-    vector_client=s3vector_client,
-    tenant_id="default",
-)
-
-# ツール付きエージェント
-agent = Agent(
-    model=MODEL_ID,
-    system_prompt=SYSTEM_PROMPT,
-    tools=[tool(search_kb)],  # RAG検索ツールを追加
-)
+  ]
+}
 ```
 
 ---
 
-## 必要なアクション
+## デプロイフロー
 
-1. **Knowledge Base の確認**
-   - `docs/sample/` がインジェスト済みか確認
-   - Knowledge Base ID の取得
+### CI/CD パイプライン
 
-2. **環境変数の設定**
-   - `KNOWLEDGE_BASE_ID` を AgentCore Runtime に設定
-
-3. **`agent.py` の修正**
-   - RAG 統合コードを追加
-
-4. **デプロイ**
-   - 修正版を AgentCore Runtime にデプロイ
+```mermaid
+flowchart LR
+    subgraph GitHub
+        A[PR to develop]
+        B[Merge]
+    end
+    
+    subgraph "GitHub Actions"
+        C[Trigger on push]
+        D[Start CodeBuild]
+        E[Wait for build]
+        F[Update AgentCore Runtime]
+        G[Wait for READY]
+    end
+    
+    subgraph AWS
+        H[CodeBuild]
+        I[ECR Push]
+        J[AgentCore Update]
+    end
+    
+    A --> B
+    B --> C
+    C --> D
+    D --> H
+    H --> I
+    I --> E
+    E --> F
+    F --> J
+    J --> G
+    
+    style B fill:#c8e6c9
+    style I fill:#bbdefb
+    style J fill:#e1bee7
+```
 
 ---
 
-## 関連リソース
+## 監視・トラブルシューティング
 
-- [Bedrock Knowledge Bases](https://docs.aws.amazon.com/bedrock/latest/userguide/knowledge-base.html)
-- [AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)
-- [Strands Agents](https://strandsagents.com/docs/)
+### ヘルスチェック
 
+```bash
+# AgentCore Runtime ステータス
+aws bedrock-agentcore-control get-agent-runtime \
+  --agent-runtime-id agentcoreRuntimeDevelopment-D7hv2Z5zVV \
+  --region ap-northeast-1 \
+  --query 'status'
+
+# Knowledge Base 検索テスト
+aws bedrock-agent-runtime retrieve \
+  --knowledge-base-id KCOEXQD1NV \
+  --retrieval-query '{"text": "製品の価格プランは？"}' \
+  --region ap-northeast-1
+```
+
+### よくある問題
+
+| 症状 | 原因 | 解決策 |
+|------|------|--------|
+| RAG が効かない | IAM 権限不足 | `bedrock:Retrieve` 追加 |
+| 検索エラー | HYBRID 検索使用 | SEMANTIC に変更 |
+| 設定読み込み失敗 | SSM パラメータ未設定 | パラメータ作成 |
+| 古い回答が返る | イメージ未更新 | CodeBuild 実行 |
+
+---
+
+## リソース一覧
+
+| リソース | 識別子 | リージョン |
+|---------|--------|-----------|
+| Knowledge Base | `KCOEXQD1NV` | ap-northeast-1 |
+| AgentCore Runtime | `agentcoreRuntimeDevelopment-D7hv2Z5zVV` | ap-northeast-1 |
+| AgentCore Endpoint | `agentcoreEndpointDevelopment` | ap-northeast-1 |
+| IAM Role | `agentcore-runtime-role-development` | - |
+| ECR Repository | `agentic-rag-agent-development` | ap-northeast-1 |
+| S3 Documents | `agentcore-documents-226484346947-development` | ap-northeast-1 |
+| Data Source ID | `R1BW5OB1WP` | - |
+
+---
+
+## 変更履歴
+
+| 日付 | 変更内容 |
+|------|----------|
+| 2025-12-10 | IAM 権限追加 (`bedrock:Retrieve`) |
+| 2025-12-10 | HYBRID 検索削除 (PR #57) |
+| 2025-12-10 | SSM Parameter Store 統合 (PR #55) |
+| 2025-12-10 | RAG 統合実装 (PR #52) |
+| 2025-12-10 | CI/CD パイプライン実装 (PR #58-60) |
