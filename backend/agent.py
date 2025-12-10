@@ -5,9 +5,13 @@ Amazon Bedrock AgentCore Runtime with Knowledge Base RAG.
 
 Based on the official AgentCore documentation:
 https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-toolkit.html
+
+Configuration is loaded from SSM Parameter Store at runtime:
+- /agentcore/{env}/knowledge-base-id
+- /agentcore/{env}/rag-top-k
+- /agentcore/{env}/rag-score-threshold
 """
 
-import json
 import os
 from typing import Any
 
@@ -19,21 +23,105 @@ from strands import Agent
 logger = structlog.get_logger()
 
 # ============================================================================
+# SSM Parameter Store Configuration Loader
+# ============================================================================
+
+class SSMConfigLoader:
+    """Load configuration from SSM Parameter Store with fallbacks."""
+    
+    def __init__(self, region: str, environment: str):
+        self._client = boto3.client("ssm", region_name=region)
+        self._env = environment
+        self._cache: dict[str, str] = {}
+        self._prefix = f"/agentcore/{environment}"
+    
+    def get(self, key: str, default: str = "") -> str:
+        """Get parameter value from SSM with caching.
+        
+        Args:
+            key: Parameter key (e.g., 'knowledge-base-id')
+            default: Default value if parameter not found
+        
+        Returns:
+            Parameter value or default
+        """
+        # Check cache first
+        if key in self._cache:
+            return self._cache[key]
+        
+        param_name = f"{self._prefix}/{key}"
+        
+        try:
+            response = self._client.get_parameter(
+                Name=param_name,
+                WithDecryption=True,  # Support SecureString
+            )
+            value = response["Parameter"]["Value"]
+            self._cache[key] = value
+            logger.info("ssm_parameter_loaded", parameter=param_name)
+            return value
+            
+        except self._client.exceptions.ParameterNotFound:
+            logger.warning(
+                "ssm_parameter_not_found",
+                parameter=param_name,
+                using_default=default,
+            )
+            return default
+            
+        except Exception as e:
+            logger.error(
+                "ssm_parameter_error",
+                parameter=param_name,
+                error=str(e),
+            )
+            return default
+    
+    def get_int(self, key: str, default: int) -> int:
+        """Get integer parameter value."""
+        value = self.get(key, str(default))
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    
+    def get_float(self, key: str, default: float) -> float:
+        """Get float parameter value."""
+        value = self.get(key, str(default))
+        try:
+            return float(value)
+        except ValueError:
+            return default
+
+
+# ============================================================================
 # Configuration
 # ============================================================================
 
-# AWS Region
+# AWS Region and Environment
 REGION = os.environ.get("AWS_REGION", "ap-northeast-1")
+ENVIRONMENT = os.environ.get("AGENTCORE_ENV", "development")
 
-# Knowledge Base ID (from SSM or environment)
-KNOWLEDGE_BASE_ID = os.environ.get("KNOWLEDGE_BASE_ID", "")
+# Initialize SSM Config Loader
+ssm_config = SSMConfigLoader(region=REGION, environment=ENVIRONMENT)
 
-# Model ID
+# Load configuration from SSM Parameter Store
+KNOWLEDGE_BASE_ID = ssm_config.get("knowledge-base-id", "")
+RAG_TOP_K = ssm_config.get_int("rag-top-k", 5)
+RAG_SCORE_THRESHOLD = ssm_config.get_float("rag-score-threshold", 0.5)
+
+# Model ID (can also be from SSM if needed)
 MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "apac.amazon.nova-pro-v1:0")
 
-# RAG Configuration
-RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "5"))
-RAG_SCORE_THRESHOLD = float(os.environ.get("RAG_SCORE_THRESHOLD", "0.5"))
+logger.info(
+    "configuration_loaded",
+    region=REGION,
+    environment=ENVIRONMENT,
+    knowledge_base_id=KNOWLEDGE_BASE_ID or "NOT_CONFIGURED",
+    rag_top_k=RAG_TOP_K,
+    rag_score_threshold=RAG_SCORE_THRESHOLD,
+    model_id=MODEL_ID,
+)
 
 # ============================================================================
 # Knowledge Base Client
@@ -180,8 +268,6 @@ kb_client = KnowledgeBaseClient(
 
 logger.info(
     "agent_initialized",
-    model_id=MODEL_ID,
-    knowledge_base_id=KNOWLEDGE_BASE_ID or "NOT_CONFIGURED",
     rag_enabled=bool(KNOWLEDGE_BASE_ID),
 )
 

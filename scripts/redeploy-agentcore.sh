@@ -123,10 +123,30 @@ echo "=============================================="
 echo "  ✅ 再デプロイ完了!"
 echo "=============================================="
 echo ""
-echo "Knowledge Base ID: KCOEXQD1NV"
-echo "RAG 機能が有効になりました。"
-echo ""
-echo "テスト方法:"
-echo "  チャットで「製品の価格プランは？」などを質問してください。"
+
+# Get Knowledge Base ID from SSM
+KB_ID=$(aws ssm get-parameter \
+  --name "/agentcore/${ENVIRONMENT}/knowledge-base-id" \
+  --query Parameter.Value \
+  --output text \
+  --region ${REGION} 2>/dev/null || echo "NOT_CONFIGURED")
+
+if [ "$KB_ID" = "NOT_CONFIGURED" ]; then
+  echo "⚠️  Knowledge Base ID が SSM に設定されていません"
+  echo ""
+  echo "設定方法:"
+  echo "  aws ssm put-parameter \\"
+  echo "    --name \"/agentcore/${ENVIRONMENT}/knowledge-base-id\" \\"
+  echo "    --value \"YOUR_KNOWLEDGE_BASE_ID\" \\"
+  echo "    --type String"
+  echo ""
+  echo "詳細: docs/deployment/ssm-parameters.md を参照"
+else
+  echo "Knowledge Base ID: ${KB_ID}"
+  echo "RAG 機能が有効になりました。"
+  echo ""
+  echo "テスト方法:"
+  echo "  チャットで「製品の価格プランは？」などを質問してください。"
+fi
 echo "=============================================="
 

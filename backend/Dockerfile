@@ -40,11 +40,17 @@ ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
 # AgentCore Configuration
-# Knowledge Base ID for RAG retrieval
-ENV KNOWLEDGE_BASE_ID=KCOEXQD1NV
-ENV RAG_TOP_K=5
-ENV RAG_SCORE_THRESHOLD=0.5
+# These values are loaded from SSM Parameter Store at runtime.
+# See: docs/deployment/ssm-parameters.md for parameter naming conventions.
+# 
+# Required SSM Parameters:
+#   /agentcore/{env}/knowledge-base-id  - Bedrock Knowledge Base ID
+#   /agentcore/{env}/rag-top-k          - Number of RAG results (default: 5)
+#   /agentcore/{env}/rag-score-threshold - Minimum similarity score (default: 0.5)
+#
+# Environment variables below are defaults/fallbacks only:
 ENV AWS_REGION=ap-northeast-1
+ENV AGENTCORE_ENV=development
 
 # Expose port for health checks (optional)
 EXPOSE 8080
