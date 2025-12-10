@@ -2,14 +2,16 @@
  * AgentCore Stack
  * 
  * AgentCore Runtime のデプロイ設定
- * ECRイメージを使用してAgentCore Runtimeを構成
+ * L2 Construct (@aws-cdk/aws-bedrock-agentcore-alpha) を使用して
+ * AgentCore Runtime を CDK で管理
  */
 
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
-import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as agentcore from '@aws-cdk/aws-bedrock-agentcore-alpha';
 import { Construct } from 'constructs';
 
 export interface AgentCoreStackProps extends cdk.StackProps {
@@ -21,9 +23,17 @@ export interface AgentCoreStackProps extends cdk.StackProps {
   memoryStoreId: string;
   /** Bedrockモデル ID */
   bedrockModelId?: string;
+  /** Cognito User Pool (認証用) */
+  userPool?: cognito.IUserPool;
+  /** Cognito User Pool Client (認証用) */
+  userPoolClient?: cognito.IUserPoolClient;
+  /** Knowledge Base ID (RAG用) */
+  knowledgeBaseId?: string;
 }
 
 export class AgentCoreStack extends cdk.Stack {
+  /** AgentCore Runtime */
+  public readonly agentRuntime: agentcore.Runtime;
   /** AgentCore Runtime IAM ロール */
   public readonly agentRole: iam.Role;
   /** AgentCore 設定パラメータ */
@@ -36,16 +46,22 @@ export class AgentCoreStack extends cdk.Stack {
       environment,
       ecrRepository,
       memoryStoreId,
-      bedrockModelId = 'us.amazon.nova-pro-v1:0',
+      bedrockModelId = 'apac.amazon.nova-pro-v1:0',
+      userPool,
+      userPoolClient,
+      knowledgeBaseId,
     } = props;
 
+    // ============================================
+    // IAM Role (カスタムロール)
+    // ============================================
+    
     // AgentCore Runtime 実行用 IAM ロール
     this.agentRole = new iam.Role(this, 'AgentCoreRuntimeRole', {
       roleName: `agentcore-runtime-role-${environment}`,
       assumedBy: new iam.CompositePrincipal(
         new iam.ServicePrincipal('bedrock.amazonaws.com'),
         new iam.ServicePrincipal('bedrock-agentcore.amazonaws.com'),
-        new iam.ServicePrincipal('lambda.amazonaws.com'),
       ),
       description: 'IAM role for AgentCore Runtime execution',
     });
@@ -63,12 +79,22 @@ export class AgentCoreStack extends cdk.Stack {
       ],
     }));
 
+    // Bedrock Knowledge Base (RAG) 権限
+    this.agentRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'bedrock:Retrieve',
+        'bedrock:RetrieveAndGenerate',
+      ],
+      resources: [
+        `arn:aws:bedrock:${this.region}:${this.account}:knowledge-base/*`,
+      ],
+    }));
+
     // AgentCore Memory アクセス権限
     this.agentRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: [
-        'bedrock-agent:RetrieveAndGenerate',
-        'bedrock-agent:Retrieve',
         'bedrock-agentcore:*',
       ],
       resources: ['*'],
@@ -124,8 +150,71 @@ export class AgentCoreStack extends cdk.Stack {
       ],
     }));
 
-    // SSM パラメータストアに設定を保存
+    // ============================================
+    // AgentCore Runtime (L2 Construct)
+    // ============================================
+
+    // 認証設定
+    let authorizerConfig: agentcore.RuntimeAuthorizerConfiguration | undefined;
+    if (userPool && userPoolClient) {
+      authorizerConfig = agentcore.RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [userPoolClient],
+      );
+    }
+    // Cognito が設定されていない場合は IAM 認証（デフォルト）
+
+    // 環境変数
+    const environmentVariables: { [key: string]: string } = {
+      'AGENTCORE_ENV': environment,
+      'AWS_REGION': this.region,
+      'BEDROCK_MODEL_ID': bedrockModelId,
+    };
+
+    // Knowledge Base ID が設定されている場合は環境変数に追加
+    // Note: SSM から取得する方が柔軟だが、CDK での設定も可能
+    if (knowledgeBaseId) {
+      environmentVariables['KNOWLEDGE_BASE_ID'] = knowledgeBaseId;
+    }
+
+    // AgentCore Runtime を作成
+    this.agentRuntime = new agentcore.Runtime(this, 'AgentCoreRuntime', {
+      runtimeName: `agentcoreRuntime${this.capitalize(environment)}`,
+      agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromEcrRepository(
+        ecrRepository,
+        'latest',
+      ),
+      executionRole: this.agentRole,
+      networkConfiguration: agentcore.RuntimeNetworkConfiguration.usingPublicNetwork(),
+      description: `Agentic RAG Agent Runtime - ${environment}`,
+      environmentVariables,
+      ...(authorizerConfig && { authorizerConfiguration: authorizerConfig }),
+      // ライフサイクル設定
+      lifecycleConfiguration: {
+        idleRuntimeSessionTimeout: cdk.Duration.minutes(15),
+        maxLifetime: cdk.Duration.hours(8),
+      },
+    });
+
+    // ============================================
+    // SSM パラメータストア
+    // ============================================
+
     this.configParameters = {};
+
+    // Agent Runtime ID を SSM に保存
+    this.configParameters['agentRuntimeId'] = new ssm.StringParameter(this, 'AgentRuntimeIdParam', {
+      parameterName: `/agentcore/${environment}/agent-runtime-id`,
+      stringValue: this.agentRuntime.agentRuntimeId,
+      description: 'AgentCore Runtime ID',
+    });
+
+    // Agent Runtime ARN を SSM に保存
+    this.configParameters['agentRuntimeArn'] = new ssm.StringParameter(this, 'AgentRuntimeArnParam', {
+      parameterName: `/agentcore/${environment}/agent-runtime-arn`,
+      stringValue: this.agentRuntime.agentRuntimeArn,
+      description: 'AgentCore Runtime ARN',
+    });
 
     this.configParameters['memoryStoreId'] = new ssm.StringParameter(this, 'MemoryStoreIdParam', {
       parameterName: `/agentcore/${environment}/memory-store-id`,
@@ -151,11 +240,35 @@ export class AgentCoreStack extends cdk.Stack {
       description: 'Deployment environment',
     });
 
+    // Knowledge Base ID を SSM に保存（設定されている場合）
+    if (knowledgeBaseId) {
+      this.configParameters['knowledgeBaseId'] = new ssm.StringParameter(this, 'KnowledgeBaseIdParam', {
+        parameterName: `/agentcore/${environment}/knowledge-base-id`,
+        stringValue: knowledgeBaseId,
+        description: 'Bedrock Knowledge Base ID for RAG',
+      });
+    }
+
+    // ============================================
     // 出力
+    // ============================================
+
     new cdk.CfnOutput(this, 'AgentRoleArn', {
       value: this.agentRole.roleArn,
       description: 'AgentCore Runtime IAM Role ARN',
       exportName: `${environment}-AgentCoreRuntimeRoleArn`,
+    });
+
+    new cdk.CfnOutput(this, 'AgentRuntimeId', {
+      value: this.agentRuntime.agentRuntimeId,
+      description: 'AgentCore Runtime ID',
+      exportName: `${environment}-AgentCoreRuntimeId`,
+    });
+
+    new cdk.CfnOutput(this, 'AgentRuntimeArn', {
+      value: this.agentRuntime.agentRuntimeArn,
+      description: 'AgentCore Runtime ARN',
+      exportName: `${environment}-AgentCoreRuntimeArn`,
     });
 
     new cdk.CfnOutput(this, 'ConfigParameterPath', {
@@ -163,5 +276,12 @@ export class AgentCoreStack extends cdk.Stack {
       description: 'SSM Parameter Store path for AgentCore config',
       exportName: `${environment}-AgentCoreConfigPath`,
     });
+  }
+
+  /**
+   * 文字列の先頭を大文字にする
+   */
+  private capitalize(str: string): string {
+    return str.charAt(0).toUpperCase() + str.slice(1);
   }
 }
