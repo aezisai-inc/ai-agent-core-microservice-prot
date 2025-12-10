@@ -106,7 +106,7 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     subgraph Frontend["🌐 Frontend (Amplify)"]
-        A[ユーザーが質問入力<br/>"製品の価格プランは？"]
+        A["ユーザーが質問入力<br/>"製品の価格プランは？""]
         Z[✅ 正確な回答を表示<br/>スターター: ¥10,000<br/>プロフェッショナル: ¥50,000]
     end
     
