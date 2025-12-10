@@ -29,6 +29,8 @@ interface EnvironmentConfig {
   awsRegion: string;
   /** 環境名 (development, staging, production) */
   environment: string;
+  /** CopilotKit Runtime URL（AG-UI Protocol エンドポイント） */
+  copilotKitRuntimeUrl: string;
 }
 
 /**
@@ -82,6 +84,10 @@ export function getConfig(): EnvironmentConfig {
     ),
     awsRegion: process.env.NEXT_PUBLIC_AWS_REGION || 'ap-northeast-1',
     environment: process.env.NODE_ENV || 'development',
+    copilotKitRuntimeUrl: validateEnvVar(
+      'NEXT_PUBLIC_COPILOTKIT_RUNTIME_URL',
+      process.env.NEXT_PUBLIC_COPILOTKIT_RUNTIME_URL
+    ),
   };
 }
 
@@ -189,4 +195,24 @@ export function isAgentCoreConfigValid(): boolean {
 export function isConfigValid(): boolean {
   // 認証設定のみをチェック（AgentCoreは必須ではない）
   return isAuthConfigValid();
+}
+
+/**
+ * CopilotKit Runtime URL を取得
+ * 
+ * @returns CopilotKit Runtime URL または undefined（未設定時）
+ */
+export function getCopilotKitRuntimeUrl(): string | undefined {
+  const config = getConfig();
+  if (config.copilotKitRuntimeUrl.startsWith('PLACEHOLDER_')) {
+    return undefined;
+  }
+  return config.copilotKitRuntimeUrl;
+}
+
+/**
+ * CopilotKit 設定が有効かどうかをチェック
+ */
+export function isCopilotKitConfigValid(): boolean {
+  return getCopilotKitRuntimeUrl() !== undefined;
 }

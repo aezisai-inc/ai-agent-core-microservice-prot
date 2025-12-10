@@ -15,11 +15,24 @@
 
 ### 1.3 対象バージョン
 
-- Base: PR #49 (fix/agentcore-response-parsing-and-mermaid)
-- Next.js: 15.5.7
+- Base: PR #51 (feat/copilotkit-ag-ui-integration)
+- Next.js: 15.5.7 (**Static Export モード: `output: export`**)
 - React: 19.0.0
 - strands-agents: >=0.1.0
 - bedrock-agentcore: >=0.1.0
+
+### 1.4 重要な制約: Static Export モード
+
+本プロジェクトは **Next.js の Static Export (`output: export`)** を使用しているため、
+以下の制約があります：
+
+- ❌ **API Routes 使用不可**: `/api/*` ルートは使用できない
+- ❌ `export const dynamic = "force-dynamic"` は使用不可
+- ✅ **外部エンドポイント直接接続**: CopilotKit は外部の AG-UI エンドポイントに直接接続
+
+**対応方針**:
+- CopilotKit の `runtimeUrl` は環境変数 `NEXT_PUBLIC_COPILOTKIT_RUNTIME_URL` で外部エンドポイントを指定
+- 環境変数未設定時は設定案内画面を表示（モック応答は使用しない）
 
 ---
 
@@ -41,19 +54,14 @@
 │  │  - agentcore-client     │           │                         │              │
 │  └───────────┬─────────────┘           └───────────┬─────────────┘              │
 │              │                                     │                            │
-│              │ AWS SDK 直接                        │ HTTP POST                  │
-│              │                                     ▼                            │
-│              │                         ┌─────────────────────────┐              │
-│              │                         │  /api/copilot           │              │
-│              │                         │  (API Route)            │              │
-│              │                         │                         │              │
-│              │                         │  - CopilotKit Runtime   │              │
-│              │                         │  - AG-UI HttpAgent      │              │
-│              │                         └───────────┬─────────────┘              │
+│              │ AWS SDK 直接                        │ HTTP POST (直接)           │
+│              │                                     │                            │
+│              │                                     │ ※ Static Export のため     │
+│              │                                     │   API Route は使用不可     │
 │              │                                     │                            │
 └──────────────┼─────────────────────────────────────┼────────────────────────────┘
                │                                     │
-               │                                     │ AG-UI Protocol
+               │                                     │ AG-UI Protocol (直接接続)
                ▼                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                           AgentCore Runtime (ECR)                               │
@@ -92,12 +100,15 @@ Browser → ChatContainer → useAuth() → AgentCoreClient → AWS SDK
 #### Route B: CopilotKit ルート（新規）
 
 ```
-Browser → /copilot → CopilotChat → /api/copilot (API Route)
+Browser → /copilot → CopilotChat → 外部 AG-UI エンドポイント (直接接続)
                                         ↓
-                          CopilotKit Runtime + AG-UI HttpAgent
+                              NEXT_PUBLIC_COPILOTKIT_RUNTIME_URL
                                         ↓
                     AgentCore Runtime (ag_ui_invoke) → Strands Agent
 ```
+
+> **Note**: Static Export モードのため、Next.js API Routes は使用できません。
+> CopilotKit は環境変数で指定された外部エンドポイントに直接 HTTP リクエストを送信します。
 
 ---
 
@@ -118,13 +129,15 @@ frontend/
 │   │   ├── page.tsx                  # 既存（変更なし）
 │   │   ├── providers.tsx             # 既存（変更なし）
 │   │   │
-│   │   ├── copilot/                  # 【新規】CopilotKit ルート
-│   │   │   ├── layout.tsx            # CopilotKit Provider
-│   │   │   └── page.tsx              # CopilotChat UI
-│   │   │
-│   │   └── api/
-│   │       └── copilot/
-│   │           └── route.ts          # 【新規】CopilotKit Runtime
+│   │   └── copilot/                  # 【新規】CopilotKit ルート
+│   │       ├── layout.tsx            # CopilotKit Provider (外部エンドポイント接続)
+│   │       └── page.tsx              # CopilotChat UI
+│   │
+│   │   # ❌ api/ ディレクトリは使用不可 (Static Export モード)
+│   │
+│   ├── shared/
+│   │   └── lib/
+│   │       └── config.ts             # 【変更】CopilotKit Runtime URL 設定追加
 │   │
 │   └── features/
 │       └── chat/
@@ -145,6 +158,7 @@ frontend/
 |---------|---------|
 | `backend/pyproject.toml` | `ag-ui-strands` 依存追加（既存依存に影響なし） |
 | `frontend/package.json` | `@copilotkit/*` 依存追加（既存依存に影響なし） |
+| `frontend/src/shared/lib/config.ts` | `getCopilotKitRuntimeUrl()` 関数追加 |
 
 ---
 
@@ -378,22 +392,30 @@ ag-ui = [
 
 ### 5.1 /copilot/layout.tsx
 
+> **重要**: Static Export モードのため、`/api/copilot` API Route は使用できません。
+> 代わりに、環境変数 `NEXT_PUBLIC_COPILOTKIT_RUNTIME_URL` で外部エンドポイントを指定します。
+
 ```tsx
 /**
  * CopilotKit Layout
- * 
+ *
  * CopilotKit Provider を /copilot 配下のみに適用。
  * 既存の Provider（Amplify, React Query）とは独立。
+ *
+ * 重要: Static Export モードでは API Routes が使用できないため、
+ * CopilotKit は環境変数で指定された外部エンドポイントに直接接続する。
  */
 "use client";
 
 import { CopilotKit } from "@copilotkit/react-core";
 import { useAuth } from "@/features/chat/hooks/use-auth";
+import { getCopilotKitRuntimeUrl, isCopilotKitConfigValid } from "@/shared/lib/config";
 import { useEffect, useState, type ReactNode } from "react";
 
 export default function CopilotLayout({ children }: { children: ReactNode }) {
   const { getIdToken, isAuthenticated, isLoading } = useAuth();
   const [authHeaders, setAuthHeaders] = useState<Record<string, string>>({});
+  const runtimeUrl = getCopilotKitRuntimeUrl();
 
   // Cognito JWT を取得して CopilotKit に渡す
   useEffect(() => {
@@ -416,11 +438,29 @@ export default function CopilotLayout({ children }: { children: ReactNode }) {
     );
   }
 
+  // CopilotKit Runtime URL が未設定の場合
+  if (!isCopilotKitConfigValid() || !runtimeUrl) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-surface-950">
+        <div className="max-w-md text-center p-6 bg-surface-900 rounded-lg border border-surface-700">
+          <h2 className="text-lg font-semibold text-surface-100 mb-3">
+            CopilotKit 未設定
+          </h2>
+          <p className="text-surface-400 text-sm mb-4">
+            環境変数 <code className="px-1 py-0.5 bg-surface-800 rounded text-amber-400">
+              NEXT_PUBLIC_COPILOTKIT_RUNTIME_URL
+            </code> を設定してください。
+          </p>
+          <a href="/" className="text-accent-400 hover:text-accent-300 text-sm">
+            ← 既存のチャット UI に戻る
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <CopilotKit
-      runtimeUrl="/api/copilot"
-      headers={authHeaders}
-    >
+    <CopilotKit runtimeUrl={runtimeUrl} headers={authHeaders}>
       {children}
     </CopilotKit>
   );
@@ -511,110 +551,21 @@ export default function CopilotPage() {
 }
 ```
 
-### 5.3 /api/copilot/route.ts
+### 5.3 API Route について
 
-```typescript
-/**
- * CopilotKit Runtime API Route
- * 
- * CopilotKit からのリクエストを受け取り、
- * AgentCore Runtime の AG-UI エンドポイントに転送する。
- */
-
-import { NextRequest, NextResponse } from "next/server";
-
-// AgentCore Runtime の AG-UI エンドポイント URL
-const AGENTCORE_AG_UI_ENDPOINT = process.env.AGENTCORE_AG_UI_ENDPOINT;
-
-export async function POST(req: NextRequest) {
-  try {
-    // Authorization ヘッダーを取得
-    const authHeader = req.headers.get("Authorization");
-
-    // リクエストボディを取得
-    const body = await req.json();
-
-    // AG-UI エンドポイントが設定されていない場合はモック応答
-    if (!AGENTCORE_AG_UI_ENDPOINT) {
-      console.warn("[CopilotKit API] AGENTCORE_AG_UI_ENDPOINT not configured, using mock response");
-      return createMockResponse(body);
-    }
-
-    // AgentCore Runtime の AG-UI エンドポイントに転送
-    const response = await fetch(AGENTCORE_AG_UI_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(authHeader ? { Authorization: authHeader } : {}),
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      throw new Error(`AgentCore responded with ${response.status}`);
-    }
-
-    // SSE ストリームを転送
-    const stream = response.body;
-    if (!stream) {
-      throw new Error("No response body");
-    }
-
-    return new NextResponse(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
-    });
-  } catch (error) {
-    console.error("[CopilotKit API] Error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
-  }
-}
-
-/**
- * モック応答（開発・テスト用）
- */
-function createMockResponse(body: { messages?: Array<{ role: string; content: string }> }) {
-  const messages = body.messages || [];
-  const lastUserMessage = messages.findLast((m) => m.role === "user");
-  const userContent = lastUserMessage?.content || "Hello";
-
-  const events = [
-    { type: "RUN_STARTED", threadId: "mock-thread" },
-    { type: "TEXT_MESSAGE_START", messageId: "mock-msg", role: "assistant" },
-    {
-      type: "TEXT_MESSAGE_CONTENT",
-      messageId: "mock-msg",
-      delta: `[Mock Response] あなたのメッセージ「${userContent.slice(0, 50)}」を受け取りました。\n\nこれは CopilotKit のモック応答です。AGENTCORE_AG_UI_ENDPOINT を設定すると、実際の AgentCore Runtime に接続されます。`,
-    },
-    { type: "TEXT_MESSAGE_END", messageId: "mock-msg" },
-    { type: "RUN_FINISHED", threadId: "mock-thread" },
-  ];
-
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    start(controller) {
-      for (const event of events) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
-      }
-      controller.close();
-    },
-  });
-
-  return new NextResponse(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  });
-}
-```
+> ⚠️ **Static Export モードの制約**
+>
+> 本プロジェクトは `next.config.js` で `output: 'export'` を設定しているため、
+> **Next.js API Routes (`/api/*`) は使用できません**。
+>
+> - `export const dynamic = "force-dynamic"` は Static Export と互換性がない
+> - 代わりに、CopilotKit は環境変数で指定された外部エンドポイントに直接接続する
+>
+> **設定方法**:
+> ```bash
+> # .env.local または Amplify 環境変数
+> NEXT_PUBLIC_COPILOTKIT_RUNTIME_URL=https://your-agentcore-endpoint/ag-ui
+> ```
 
 ### 5.4 package.json 追加依存
 
@@ -639,8 +590,9 @@ function createMockResponse(body: { messages?: Array<{ role: string; content: st
 3. 未認証の場合 → AuthModal を表示
 4. 認証済みの場合 → getIdToken() で Cognito JWT を取得
 5. JWT を CopilotKit の headers に設定
-6. CopilotChat がメッセージ送信時に Authorization ヘッダー付きで /api/copilot に POST
-7. /api/copilot が JWT を AgentCore に転送
+6. CopilotChat がメッセージ送信時に Authorization ヘッダー付きで外部エンドポイントに POST
+   (NEXT_PUBLIC_COPILOTKIT_RUNTIME_URL で指定)
+7. 外部エンドポイント (AgentCore Runtime) が JWT を検証して処理
 ```
 
 ### 6.2 既存認証との共有
@@ -657,12 +609,17 @@ const { getIdToken, isAuthenticated, isLoading, user } = useAuth();
 
 ## 7. 環境変数
 
-### 7.1 新規追加
+### 7.1 新規追加（CopilotKit 用）
 
 ```bash
-# .env.local に追加
-AGENTCORE_AG_UI_ENDPOINT=https://xxx.execute-api.ap-northeast-1.amazonaws.com/ag-ui
+# .env.local または Amplify 環境変数に追加
+#
+# CopilotKit が直接接続する AG-UI Protocol エンドポイント
+# (Static Export モードのため、クライアントサイドから直接アクセス可能な URL が必要)
+NEXT_PUBLIC_COPILOTKIT_RUNTIME_URL=https://your-agentcore-endpoint/ag-ui
 ```
+
+> **Note**: `NEXT_PUBLIC_` プレフィックスが必要です（クライアントサイドで使用するため）
 
 ### 7.2 既存（変更なし）
 
@@ -693,11 +650,12 @@ NEXT_PUBLIC_AGENT_RUNTIME_ARN=arn:aws:bedrock-agentcore:...
 ```bash
 # CopilotKit 関連ファイルを削除するだけ
 rm -rf frontend/src/app/copilot
-rm -rf frontend/src/app/api/copilot
 rm backend/ag_ui_entrypoint.py
 
 # 依存関係を戻す
 cd frontend && npm uninstall @copilotkit/react-core @copilotkit/react-ui
+
+# config.ts の CopilotKit 関連関数は残しても影響なし（使用されないため）
 ```
 
 ---
