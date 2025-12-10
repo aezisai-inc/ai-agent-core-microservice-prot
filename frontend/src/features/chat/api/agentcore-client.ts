@@ -335,8 +335,21 @@ export class AgentCoreClient {
 
           // バッファに残りがあれば処理
           if (buffer.trim()) {
-            fullResponse += buffer;
-            yield { type: "text", content: buffer };
+            try {
+              const data = JSON.parse(buffer);
+              const extractedText = extractTextFromResponse(data);
+              if (extractedText) {
+                fullResponse += extractedText;
+                yield { type: "text", content: extractedText };
+              } else {
+                fullResponse += buffer;
+                yield { type: "text", content: buffer };
+              }
+            } catch {
+              // JSONでない場合はそのまま出力
+              fullResponse += buffer;
+              yield { type: "text", content: buffer };
+            }
           }
         } catch (streamError) {
           // ストリーミングに失敗した場合、文字列として取得
