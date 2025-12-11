@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { ChevronDown, ChevronUp, BookOpen } from "lucide-react";
@@ -76,6 +77,7 @@ export function MessageBubble({
           ) : (
             <div className="prose prose-invert prose-sm max-w-none prose-headings:text-primary-300 prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-sm prose-p:text-surface-200 prose-p:leading-relaxed prose-strong:text-white prose-strong:font-semibold prose-ul:text-surface-200 prose-ol:text-surface-200 prose-li:marker:text-primary-400 prose-a:text-primary-400 prose-a:no-underline hover:prose-a:underline prose-blockquote:border-l-primary-500 prose-blockquote:text-surface-300 prose-hr:border-surface-700">
               <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
                 components={{
                   code({ node, className, children, ...props }) {
                     const match = /language-(\w+)/.exec(className || "");

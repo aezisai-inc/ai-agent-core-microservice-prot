@@ -15,7 +15,7 @@ interface ChatInputProps {
 export function ChatInput({
   onSend,
   isLoading = false,
-  placeholder = "メッセージを入力...",
+  placeholder = "メッセージを入力... (⌘+Enter で送信)",
   className,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
@@ -32,10 +32,14 @@ export function ChatInput({
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Cmd+Enter (Mac) または Ctrl+Enter (Windows) で送信
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       handleSend();
+      return;
     }
+    // Shift+Enter は改行（デフォルト動作）
+    // Enter のみは改行（デフォルト動作）
   };
 
   const handleInput = () => {
