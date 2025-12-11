@@ -2,16 +2,44 @@
 #
 # AgentCore Runtime 再デプロイスクリプト
 #
+# ⚠️  DEPRECATED: このスクリプトは非推奨です。
+#     CDK による CI/CD パイプラインを使用してください。
+#
+#     代替方法:
+#       1. GitHub Actions による自動デプロイ (推奨)
+#       2. 手動: cd infrastructure && npx cdk deploy AgenticRag-AgentCore-*
+#
+#     詳細: docs/architecture/iac-custom-resource-design.md
+#
 # このスクリプトは以下を実行します:
 # 1. Docker イメージをビルド
 # 2. ECR にプッシュ
-# 3. AgentCore Runtime を更新
+# 3. AgentCore Runtime を更新 (heredoc Python - 非推奨)
 #
 # 使用方法:
 #   ./scripts/redeploy-agentcore.sh
 #
 
 set -e
+
+# Deprecation warning
+echo ""
+echo "========================================================================"
+echo "⚠️  DEPRECATED: This script is deprecated."
+echo "   Use CDK-based deployment instead:"
+echo ""
+echo "   Option 1: Push to develop branch (GitHub Actions auto-deploy)"
+echo "   Option 2: cd infrastructure && npx cdk deploy AgenticRag-AgentCore-*"
+echo ""
+echo "   See: docs/architecture/iac-custom-resource-design.md"
+echo "========================================================================"
+echo ""
+read -p "Continue anyway? (y/N): " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 1
+fi
 
 # Configuration
 ENVIRONMENT="${ENVIRONMENT:-development}"

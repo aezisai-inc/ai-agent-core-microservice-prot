@@ -1,151 +1,105 @@
 /**
  * Memory Stack
- * 
+ *
  * AgentCore Memory Store のプロビジョニング
- * Custom Resource を使用して AgentCore CLI でメモリストアを作成
+ * Custom Resource Construct を使用して AgentCore Memory Store を IaC 管理
+ *
+ * @see docs/architecture/iac-custom-resource-design.md
  */
 
 import * as cdk from 'aws-cdk-lib';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as iam from 'aws-cdk-lib/aws-iam';
-import * as logs from 'aws-cdk-lib/aws-logs';
-import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
+import { AgentCoreMemory } from './constructs';
 
 export interface MemoryStackProps extends cdk.StackProps {
-  /** 環境名 (dev/staging/prod) */
+  /**
+   * 環境名 (development/staging/production)
+   */
   environment: string;
-  /** メモリストア名 */
+
+  /**
+   * メモリストア名
+   *
+   * @default agenticRagMemory{Environment}
+   */
   memoryStoreName?: string;
+
+  /**
+   * イベント有効期限（日数）
+   *
+   * @default 30 for development, 90 for production
+   */
+  eventExpiryDuration?: number;
+
+  /**
+   * AgentCore APIリージョン
+   *
+   * @default ap-northeast-1
+   */
+  agentCoreRegion?: string;
 }
 
+/**
+ * AgentCore Memory Stack
+ *
+ * Creates and manages AgentCore Memory Store using CDK Custom Resource.
+ * All resources are managed through CloudFormation for complete IaC.
+ */
 export class MemoryStack extends cdk.Stack {
-  /** メモリストア ID */
+  /**
+   * Memory Store ID
+   */
   public readonly memoryStoreId: string;
-  /** メモリストア ARN */
+
+  /**
+   * Memory Store ARN
+   */
   public readonly memoryStoreArn: string;
+
+  /**
+   * AgentCore Memory Construct
+   */
+  public readonly memory: AgentCoreMemory;
 
   constructor(scope: Construct, id: string, props: MemoryStackProps) {
     super(scope, id, props);
 
-    const { environment, memoryStoreName = `agentic-rag-memory-${environment}` } = props;
+    const {
+      environment,
+      memoryStoreName = `agenticRagMemory${this.capitalize(environment)}`,
+      eventExpiryDuration,
+      agentCoreRegion = 'ap-northeast-1',
+    } = props;
 
-    // AgentCore Memory 操作用 Lambda
-    const memoryProviderLambda = new lambda.Function(this, 'MemoryProviderLambda', {
-      functionName: `agentcore-memory-provider-${environment}`,
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'index.handler',
-      timeout: cdk.Duration.minutes(5),
-      memorySize: 256,
-      code: lambda.Code.fromInline(this.getMemoryProviderCode()),
-      logRetention: logs.RetentionDays.ONE_WEEK,
+    // Create AgentCore Memory using Custom Resource Construct
+    this.memory = new AgentCoreMemory(this, 'AgentCoreMemory', {
+      memoryName: memoryStoreName,
+      environment,
+      eventExpiryDuration,
+      agentCoreRegion,
+      saveToSsm: true,
+      ssmPrefix: `/agentcore/${environment}`,
     });
 
-    // Lambda に AgentCore 操作権限を付与
-    memoryProviderLambda.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'bedrock:*',
-        'bedrock-agent:*',
-      ],
-      resources: ['*'],
-    }));
+    // Expose values
+    this.memoryStoreId = this.memory.memoryId;
+    this.memoryStoreArn = this.memory.memoryArn;
 
-    // Custom Resource Provider
-    const provider = new cr.Provider(this, 'MemoryProvider', {
-      onEventHandler: memoryProviderLambda,
-      logRetention: logs.RetentionDays.ONE_WEEK,
-    });
-
-    // Memory Store Custom Resource
-    const memoryStore = new cdk.CustomResource(this, 'AgentCoreMemoryStore', {
-      serviceToken: provider.serviceToken,
-      properties: {
-        MemoryStoreName: memoryStoreName,
-        Strategies: [
-          { type: 'semantic', name: 'semanticFacts' },
-          { type: 'episodic', name: 'episodicLearning' },
-        ],
-        Environment: environment,
-      },
-    });
-
-    // 出力値を設定
-    this.memoryStoreId = memoryStore.getAttString('MemoryStoreId');
-    this.memoryStoreArn = memoryStore.getAttString('MemoryStoreArn');
-
-    // CloudFormation 出力
-    new cdk.CfnOutput(this, 'MemoryStoreId', {
+    // Stack-level outputs (in addition to construct outputs)
+    new cdk.CfnOutput(this, 'StackMemoryStoreId', {
       value: this.memoryStoreId,
-      description: 'AgentCore Memory Store ID',
-      exportName: `${environment}-AgentCoreMemoryStoreId`,
+      description: 'AgentCore Memory Store ID (Stack Output)',
     });
 
-    new cdk.CfnOutput(this, 'MemoryStoreArn', {
-      value: this.memoryStoreArn,
-      description: 'AgentCore Memory Store ARN',
-      exportName: `${environment}-AgentCoreMemoryStoreArn`,
-    });
+    // Tags
+    cdk.Tags.of(this).add('Component', 'AgentCoreMemory');
+    cdk.Tags.of(this).add('ManagedBy', 'CDK-CustomResource');
   }
 
   /**
-   * Memory Provider Lambda のコードを生成
+   * 文字列の先頭を大文字にする
    */
-  private getMemoryProviderCode(): string {
-    const region = cdk.Stack.of(this).region;
-    const account = cdk.Stack.of(this).account;
-
-    return `
-import json
-import boto3
-import cfnresponse
-
-def handler(event, context):
-    """
-    Custom Resource Handler for AgentCore Memory Store
-    
-    AgentCore Memory Store の作成/更新/削除を処理
-    """
-    try:
-        request_type = event['RequestType']
-        properties = event['ResourceProperties']
-        
-        store_name = properties.get('MemoryStoreName', 'default-memory')
-        strategies = properties.get('Strategies', [])
-        
-        # AgentCore Memory API クライアント
-        # Note: 実際のAPIが利用可能になったら bedrock-agentcore SDK を使用
-        client = boto3.client('bedrock-agent', region_name='${region}')
-        
-        if request_type == 'Create':
-            # メモリストア作成
-            # Note: 実際のAPI呼び出しに置き換え
-            response = {
-                'memoryStoreId': store_name + '-id',
-                'memoryStoreArn': 'arn:aws:bedrock-agentcore:${region}:${account}:memory-store/' + store_name
-            }
-            
-            cfnresponse.send(event, context, cfnresponse.SUCCESS, {
-                'MemoryStoreId': response['memoryStoreId'],
-                'MemoryStoreArn': response['memoryStoreArn'],
-            }, response['memoryStoreId'])
-            
-        elif request_type == 'Update':
-            # メモリストア更新
-            physical_id = event.get('PhysicalResourceId')
-            cfnresponse.send(event, context, cfnresponse.SUCCESS, {
-                'MemoryStoreId': physical_id,
-            }, physical_id)
-            
-        elif request_type == 'Delete':
-            # メモリストア削除
-            physical_id = event.get('PhysicalResourceId')
-            # Note: 実際の削除処理
-            cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physical_id)
-            
-    except Exception as e:
-        print('Error: ' + str(e))
-        cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
-`;
+  private capitalize(str: string): string {
+    return str.charAt(0).toUpperCase() + str.slice(1);
   }
 }

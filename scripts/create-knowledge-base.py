@@ -2,10 +2,18 @@
 """
 Knowledge Base (S3 Vector) Creation Script
 
-Creates a Bedrock Knowledge Base with S3 as the data source
-for RAG (Retrieval Augmented Generation) functionality.
+⚠️  DEPRECATED: このスクリプトは非推奨です。
+    CDK Custom Resource を使用してください。
 
-Usage:
+    代替方法:
+    ```bash
+    cd infrastructure
+    npx cdk deploy AgenticRag-KnowledgeBase-*
+    ```
+
+    詳細: docs/architecture/iac-custom-resource-design.md
+
+Usage (非推奨):
     python scripts/create-knowledge-base.py
 """
 
@@ -13,7 +21,24 @@ import boto3
 import os
 import time
 import json
+import warnings
 from typing import Optional
+
+# Deprecation warning
+warnings.warn(
+    "\n"
+    "=" * 70 + "\n"
+    "⚠️  DEPRECATED: This script is deprecated.\n"
+    "   Use CDK Custom Resource instead:\n"
+    "\n"
+    "   cd infrastructure\n"
+    "   npx cdk deploy AgenticRag-KnowledgeBase-*\n"
+    "\n"
+    "   See: docs/architecture/iac-custom-resource-design.md\n"
+    "=" * 70,
+    DeprecationWarning,
+    stacklevel=2
+)
 
 # Configuration
 REGION = os.environ.get("AWS_DEFAULT_REGION", "ap-northeast-1")

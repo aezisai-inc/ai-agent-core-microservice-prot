@@ -2,10 +2,18 @@
 """
 AgentCore Memory Store 作成スクリプト
 
-CDK の Custom Resource が正常に動作しないため、
-boto3 で直接 Memory Store を作成します。
+⚠️  DEPRECATED: このスクリプトは非推奨です。
+    CDK Custom Resource を使用してください。
 
-Usage:
+    代替方法:
+    ```bash
+    cd infrastructure
+    npx cdk deploy AgenticRag-Memory-*
+    ```
+
+    詳細: docs/architecture/iac-custom-resource-design.md
+
+Usage (非推奨):
     uv run python scripts/create-memory-store.py [--env development|staging|prod]
 """
 
@@ -13,9 +21,26 @@ import argparse
 import json
 import sys
 import time
+import warnings
 
 import boto3
 from botocore.exceptions import ClientError
+
+# Deprecation warning
+warnings.warn(
+    "\n"
+    "=" * 70 + "\n"
+    "⚠️  DEPRECATED: This script is deprecated.\n"
+    "   Use CDK Custom Resource instead:\n"
+    "\n"
+    "   cd infrastructure\n"
+    "   npx cdk deploy AgenticRag-Memory-*\n"
+    "\n"
+    "   See: docs/architecture/iac-custom-resource-design.md\n"
+    "=" * 70,
+    DeprecationWarning,
+    stacklevel=2
+)
 
 
 def create_memory_store(env: str = "development", region: str = "us-east-1") -> dict:
