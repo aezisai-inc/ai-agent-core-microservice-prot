@@ -288,35 +288,59 @@ async def _analyze_conversation(
     conversation: str,
 ) -> dict[str, Any] | None:
     """Analyze conversation using LLM and extract knowledge."""
+    import re
     prompt = ANALYSIS_PROMPT.format(conversation=conversation)
     
     try:
+        # Build request body based on model type
+        if "nova" in model_id.lower():
+            # Amazon Nova format
+            request_body = {
+                "messages": [{"role": "user", "content": [{"text": prompt}]}],
+                "inferenceConfig": {
+                    "maxTokens": 2000,
+                    "temperature": 0.3,
+                },
+            }
+        elif "claude" in model_id.lower():
+            # Anthropic Claude format
+            request_body = {
+                "anthropic_version": "bedrock-2023-05-31",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 2000,
+                "temperature": 0.3,
+            }
+        else:
+            # Default format (try Nova)
+            request_body = {
+                "messages": [{"role": "user", "content": [{"text": prompt}]}],
+                "inferenceConfig": {
+                    "maxTokens": 2000,
+                    "temperature": 0.3,
+                },
+            }
+        
         response = client.invoke_model(
             modelId=model_id,
             contentType="application/json",
             accept="application/json",
-            body=json.dumps({
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 2000,
-                "temperature": 0.3,
-            }),
+            body=json.dumps(request_body),
         )
         
         response_body = json.loads(response["body"].read())
         
         # Extract content based on model response format
-        if "content" in response_body:
-            # Claude format
-            content = response_body["content"][0]["text"]
-        elif "output" in response_body:
+        if "output" in response_body:
             # Nova format
             content = response_body["output"]["message"]["content"][0]["text"]
+        elif "content" in response_body:
+            # Claude format
+            content = response_body["content"][0]["text"]
         else:
             content = str(response_body)
         
         # Parse JSON from response
         # Find JSON block in response
-        import re
         json_match = re.search(r"```json\s*([\s\S]*?)\s*```", content)
         if json_match:
             return json.loads(json_match.group(1))
@@ -375,12 +399,20 @@ async def _upload_to_s3(
     document: KnowledgeDocument,
 ) -> str:
     """Upload document to S3."""
-    # Generate unique filename
+    import base64
+    import hashlib
+    
+    # Generate unique filename using hash for Japanese titles
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    safe_title = "".join(c if c.isalnum() or c in "-_" else "_" for c in document.title[:50])
-    filename = f"{timestamp}_{safe_title}.md"
+    title_hash = hashlib.md5(document.title.encode()).hexdigest()[:8]
+    filename = f"{timestamp}_{title_hash}.md"
     
     key = f"{prefix.rstrip('/')}/{document.category}/{filename}"
+    
+    # S3 metadata only supports ASCII, so encode Japanese text
+    def encode_metadata(value: str) -> str:
+        """Base64 encode non-ASCII metadata values."""
+        return base64.b64encode(value.encode("utf-8")).decode("ascii")
     
     client.put_object(
         Bucket=bucket,
@@ -388,11 +420,11 @@ async def _upload_to_s3(
         Body=document.content.encode("utf-8"),
         ContentType="text/markdown; charset=utf-8",
         Metadata={
-            "title": document.title,
+            "title-b64": encode_metadata(document.title),
             "category": document.category,
-            "tags": ",".join(document.tags),
-            "session_id": document.source_session_id,
-            "generated_at": document.generated_at,
+            "tags-b64": encode_metadata(",".join(document.tags)),
+            "session-id": document.source_session_id,
+            "generated-at": document.generated_at,
         },
     )
     
