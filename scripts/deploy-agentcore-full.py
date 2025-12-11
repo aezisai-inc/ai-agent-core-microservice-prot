@@ -2,17 +2,21 @@
 """
 AgentCore Full Deployment Script
 
-This script deploys the complete AgentCore infrastructure:
-1. Agent Runtime (using ECR image)
-2. Agent Runtime Endpoint
-3. Gateway (optional)
+⚠️  DEPRECATED: このスクリプトは非推奨です。
+    CDK を使用してください。
+
+    代替方法:
+    ```bash
+    cd infrastructure
+    npx cdk deploy --all
+    ```
+
+    詳細: docs/architecture/iac-custom-resource-design.md
 
 Prerequisites:
 - ECR image must be built and pushed
-- Memory Store must be created (us-east-1)
-- IAM role must exist
 
-Usage:
+Usage (非推奨):
     python scripts/deploy-agentcore-full.py
 """
 
@@ -20,7 +24,24 @@ import boto3
 import os
 import time
 import json
+import warnings
 from typing import Optional
+
+# Deprecation warning
+warnings.warn(
+    "\n"
+    "=" * 70 + "\n"
+    "⚠️  DEPRECATED: This script is deprecated.\n"
+    "   Use CDK deployment instead:\n"
+    "\n"
+    "   cd infrastructure\n"
+    "   npx cdk deploy --all\n"
+    "\n"
+    "   See: docs/architecture/iac-custom-resource-design.md\n"
+    "=" * 70,
+    DeprecationWarning,
+    stacklevel=2
+)
 
 # Configuration
 # AgentCore is now GA in ap-northeast-1 (Tokyo)
