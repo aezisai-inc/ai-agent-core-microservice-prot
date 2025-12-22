@@ -252,3 +252,12 @@ aws ssm put-parameter \
 
 echo "✅ SSM parameters saved"
 
+
+
+
+
+
+
+
+
+

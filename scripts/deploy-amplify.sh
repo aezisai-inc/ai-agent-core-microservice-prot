@@ -108,3 +108,12 @@ echo ""
 echo "📊 Check status:"
 echo "   aws amplify get-job --app-id ${APP_ID} --branch-name ${BRANCH_NAME} --job-id ${JOB_ID} --region ${REGION}"
 
+
+
+
+
+
+
+
+
+
