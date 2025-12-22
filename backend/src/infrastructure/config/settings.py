@@ -4,22 +4,33 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """Application settings loaded from environment variables.
+    
+    All sensitive IDs should be set via environment variables or SSM parameters.
+    See DEPLOYMENT_REPORT.md for SSM parameter paths.
+    """
 
     # AWS
     aws_region: str = "ap-northeast-1"
+    environment: str = "development"
 
-    # DynamoDB
-    event_store_table: str = "agentic-rag-events"
-    read_model_table: str = "agentic-rag-read-models"
+    # DynamoDB (環境に応じてテーブル名が変わる)
+    event_store_table: str = "agentic-rag-events-development"
+    read_model_table: str = "agentic-rag-read-models-development"
 
-    # Bedrock
+    # Bedrock Knowledge Base (S3 Vectors)
+    # SSM: /agentcore/${environment}/knowledge-base-id
     knowledge_base_id: str = ""
-    default_model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0"
+    # SSM: /agentcore/${environment}/data-source-id
+    data_source_id: str = ""
+    default_model_id: str = "us.amazon.nova-pro-v1:0"
 
     # AgentCore
-    agent_id: str = ""
-    agent_alias_id: str = ""
+    # SSM: /agentcore/${environment}/agent-endpoint-id
+    agent_runtime_name: str = ""
+    agent_endpoint_id: str = ""
+    # SSM: /agentcore/${environment}/memory-store-id
+    memory_store_id: str = ""
 
     # Cognito
     cognito_user_pool_id: str = ""

@@ -10,4 +10,5 @@ export { Input, type InputProps } from "./input";
 export { Avatar, type AvatarProps } from "./avatar";
 export { Spinner } from "./spinner";
 export { Badge, type BadgeProps } from "./badge";
+export { MermaidDiagram } from "./mermaid-diagram";
 
